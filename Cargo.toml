@@ -1,0 +1,6 @@
+[package]
+name = "rirc_server"
+version = "0.1.0"
+authors = ["tux3 <barrdetwix@gmail.com>"]
+
+[dependencies]
