@@ -1,5 +1,5 @@
-use tokio::io::{AsyncRead, Error, ErrorKind};
-use std::io::{BufRead};
+use tokio::io::{AsyncRead, ErrorKind};
+use std::io::{BufRead, Error};
 use futures::{Stream, Poll, Async};
 use std::mem;
 use message::Message;
@@ -34,12 +34,6 @@ impl<T: AsyncRead + BufRead> Stream for MessageStream<T> {
         };
         if n == 0 && self.msg_line.len() == 0 {
             return Ok(None.into())
-        }
-        if self.msg_line.ends_with("\n") {
-            self.msg_line.pop();
-            if self.msg_line.ends_with("\r") {
-                self.msg_line.pop();
-            }
         }
         let msg_line = &mem::replace(&mut self.msg_line, String::new());
         Ok(Some(Message::new(msg_line)).into())

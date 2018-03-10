@@ -1,12 +1,10 @@
-
-use message_stream::{MessageStream};
-use client::Client;
+use client::{ClientDuplex, Client};
 use std::net::SocketAddr;
 use tokio;
-use tokio::io::{AsyncRead, write_all};
 use tokio::net::{TcpListener};
 use futures::{Future, Stream};
-use std::io::BufReader;
+use std::io::{Error};
+use message::Message;
 
 pub struct Server {
     addr: SocketAddr,
@@ -23,7 +21,7 @@ impl Server {
         let listener = TcpListener::bind(&self.addr).unwrap();
 
         let server_fut = listener.incoming().for_each(move | socket| {
-            Server::handle_client(Client::new(socket));
+            Server::handle_client(ClientDuplex::new(socket));
 
             Ok(())
         }).map_err(|_| ());
@@ -31,19 +29,19 @@ impl Server {
         tokio::run(server_fut);
     }
 
-    fn handle_client(client: Client) {
+    fn handle_client(client_duplex: ClientDuplex) {
+        let client = client_duplex.client;
         println!("New client: {}", client.addr.to_string());
 
-        let (socket_r, socket_w) = client.socket.split();
-        let msg_stream = MessageStream::new(BufReader::new(socket_r));
+        let fut = client_duplex.stream
+            .fold(client, |client, msg| {
+            Server::process_message(client, msg)
+        });
 
-        let fut = msg_stream.fold(socket_w,|sock_w, msg| {
-            let reply = format!("{} {}\n", msg.command, msg.params.join(" ")).into_bytes();
-            write_all(sock_w, reply).map(|(sock_w, _)| sock_w)
-        })
-        .map_err(|_| ())
-        .then(|_| Ok(()));
+        tokio::spawn(fut.then(|_| Ok(())));
+    }
 
-        tokio::spawn(fut);
+    fn process_message(client: Client, msg: Message) -> Box<Future<Item=Client, Error=Error>  + Send> {
+        client.send(msg)
     }
 }
