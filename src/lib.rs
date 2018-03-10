@@ -7,4 +7,4 @@ mod message;
 mod message_stream;
 mod message_sink;
 
-pub use server::Server;
+pub use server::{Server, ServerSettings};

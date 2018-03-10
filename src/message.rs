@@ -1,5 +1,5 @@
 // A tag at the start of an IRC message
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct MessageTag {
     pub name: String,
     pub value: Option<String>,
@@ -15,7 +15,7 @@ impl ToString for MessageTag {
 }
 
 // One IRC message, delimited by \r\n, or \n
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct Message {
     pub tags: Vec<MessageTag>,
     pub source: Option<String>,

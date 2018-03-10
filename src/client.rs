@@ -8,7 +8,7 @@ use message_stream::MessageStream;
 use futures::{Stream, Sink, Future};
 
 pub enum ClientStatus {
-    Unidentified, // State immediately after connecting, before setting Nick and User
+    Unregistered, // State immediately after connecting, before setting Nick and User
     User, // Normal user
 }
 
@@ -28,7 +28,7 @@ impl ClientDuplex {
             client: Client {
                 sink,
                 addr,
-                state: ClientStatus::Unidentified,
+                state: ClientStatus::Unregistered,
             },
         }
     }
