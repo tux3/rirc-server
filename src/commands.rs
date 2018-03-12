@@ -15,21 +15,21 @@ enum CommandNamespace {
     Normal,
 }
 
-pub type CommandHandler = Fn(Arc<ServerState>, &mut Client, Message) -> Box<Future<Item=(), Error=Error>  + Send> + Sync;
+pub type CommandHandler = fn(Arc<ServerState>, &mut Client, Message) -> Box<Future<Item=(), Error=Error>  + Send>;
 
 pub struct Command {
     pub name: &'static str,
     permissions: CommandNamespace,
-    pub handler: &'static CommandHandler,
+    pub handler: CommandHandler,
 }
 
 const COMMANDS_LIST: &[Command] = &[
-    Command{name: "NICK", permissions: CommandNamespace::Any, handler: &handle_nick},
-    Command{name: "USER", permissions: CommandNamespace::Any, handler: &handle_user},
-    Command{name: "NOTICE", permissions: CommandNamespace::Any, handler: &handle_notice},
-    Command{name: "VERSION", permissions: CommandNamespace::Normal, handler: &handle_version},
-    Command{name: "LUSERS", permissions: CommandNamespace::Normal, handler: &handle_lusers},
-    Command{name: "MOTD", permissions: CommandNamespace::Normal, handler: &handle_motd},
+    Command{name: "NICK", permissions: CommandNamespace::Any, handler: handle_nick},
+    Command{name: "USER", permissions: CommandNamespace::Any, handler: handle_user},
+    Command{name: "NOTICE", permissions: CommandNamespace::Any, handler: handle_notice},
+    Command{name: "VERSION", permissions: CommandNamespace::Normal, handler: handle_version},
+    Command{name: "LUSERS", permissions: CommandNamespace::Normal, handler: handle_lusers},
+    Command{name: "MOTD", permissions: CommandNamespace::Normal, handler: handle_motd},
 ];
 
 lazy_static! {
@@ -192,11 +192,22 @@ pub fn handle_motd(state: Arc<ServerState>, client: &mut Client, msg: Message) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     fn is_valid_username(max_len: usize, username: &str) -> bool {
         match make_valid_username(max_len, username) {
             Some(fixed) => fixed == "~".to_owned()+username,
             None =>  false,
+        }
+    }
+
+    #[test]
+    fn no_command_duplicates() {
+        let mut names = HashSet::new();
+        let mut handlers = HashSet::new();
+        for cmd in COMMANDS_LIST {
+            assert!(names.insert(cmd.name), format!("Command {} appears twice in the list", cmd.name));
+            assert!(handlers.insert(cmd.handler as usize), format!("Command {}'s handler is a duplicate", cmd.name));
         }
     }
 
