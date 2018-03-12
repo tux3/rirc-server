@@ -30,6 +30,7 @@ const COMMANDS_LIST: &[Command] = &[
     Command{name: "VERSION", permissions: CommandNamespace::Normal, handler: handle_version},
     Command{name: "LUSERS", permissions: CommandNamespace::Normal, handler: handle_lusers},
     Command{name: "MOTD", permissions: CommandNamespace::Normal, handler: handle_motd},
+    Command{name: "PRIVMSG", permissions: CommandNamespace::Normal, handler: handle_privmsg},
 ];
 
 lazy_static! {
@@ -189,6 +190,38 @@ pub fn handle_motd(state: Arc<ServerState>, client: &mut Client, msg: Message) -
     client.send_motd(&state)
 }
 
+pub fn handle_privmsg(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
+    let target = match msg.params.get(0) {
+        Some(nick) => nick,
+        None => return command_error!(state, client, ReplyCode::ErrNoRecipient{cmd: "PRIVMSG".to_owned()}),
+    };
+    let msg_text = match msg.params.get(1) {
+        Some(msg_text) => msg_text,
+        None => return command_error!(state, client, ReplyCode::ErrNoTextToSend),
+    };
+    let reply = Message {
+        tags: Vec::new(),
+        source: Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!")),
+        command: "PRIVMSG".to_owned(),
+        params: vec!(msg_text.to_owned()),
+    };
+
+    // TODO: If the target starts with #, treat it as a channel
+
+    if target.to_ascii_uppercase() == client.get_nick().expect("PRIVMSG sent by user without a nick!").to_ascii_uppercase() {
+        client.send(reply)
+    } else if let Some(target_user) = state.users.lock().expect("State users lock broken").get(&target.to_ascii_uppercase()) {
+        let target_user = match target_user.upgrade() {
+            Some(target_user) => target_user,
+            None => return command_error!(state, client, ReplyCode::ErrNoSuchNick{nick: target.clone()}),
+        };
+        let target_user = target_user.read().expect("User read lock broken");
+        target_user.send(reply)
+    } else {
+        return command_error!(state, client, ReplyCode::ErrNoSuchNick{nick: target.clone()});
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,6 +265,7 @@ mod tests {
         assert_eq!(is_valid_nick(16, "ABCXYZ"), true);
         assert_eq!(is_valid_nick(16, "aaa555"), true);
         assert_eq!(is_valid_nick(16, "555aaa"), false);
+        assert_eq!(is_valid_nick(16, "#channel"), false);
 
         assert_eq!(is_valid_nick(16, "aaa---"), true);
         assert_eq!(is_valid_nick(16, "---aaa"), false);

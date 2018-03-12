@@ -18,7 +18,11 @@ pub enum ReplyCode {
 
     RplVersion{comments: String},
 
+    ErrNoSuchNick{nick: String},
     ErrNoSuchServer{server: String},
+    ErrNoSuchChannel{channel: String},
+    ErrNoRecipient{cmd: String},
+    ErrNoTextToSend,
     ErrUnknownCommand{cmd: String},
     ErrNoMotd,
     ErrNoNicknameGiven,
@@ -48,9 +52,13 @@ pub fn make_reply_msg(state: &ServerState, client_nick: &str, reply_type: ReplyC
 
         ReplyCode::RplVersion{comments} => ("351", vec!(env!("CARGO_PKG_VERSION").to_owned(), state.settings.server_name.clone()),  comments),
 
+        ReplyCode::ErrNoSuchNick{nick} => ("401", vec!(nick) , format!("No such nick/channel")),
         ReplyCode::ErrNoSuchServer{server} => ("402", vec!(server) , format!("No such server")),
+        ReplyCode::ErrNoSuchChannel{channel} => ("403", vec!(channel) , format!("No such channel")),
+        ReplyCode::ErrNoRecipient{cmd} => ("411", vec!() , format!("No recipient given ({})", cmd)),
+        ReplyCode::ErrNoTextToSend => ("412", vec!() , format!("No text to send")),
         ReplyCode::ErrUnknownCommand{cmd} => ("421", vec!(cmd) , format!("Unknown command")),
-        ReplyCode::ErrNoMotd{} => ("422", vec!() , format!("No MOTD set.")),
+        ReplyCode::ErrNoMotd => ("422", vec!() , format!("No MOTD set.")),
         ReplyCode::ErrNoNicknameGiven => ("431", vec!() , format!("No nickname given")),
         ReplyCode::ErrErroneusNickname{nick} => ("432", vec!(nick) , format!("Erroneous nickname")),
         ReplyCode::ErrNicknameInUse{nick} => ("433", vec!(nick) , format!("Nickname is already in use.")),
