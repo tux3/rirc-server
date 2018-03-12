@@ -8,13 +8,13 @@ pub enum ReplyCode {
     RplMyInfo,
     RplIsSupport{features: Vec<String>},
 
-    RplLuserClient{num_users: usize, num_invisibles: usize},
+    RplLuserClient{num_visibles: usize, num_invisibles: usize},
     RplLuserOp{num_ops: usize},
     RplLuserUnknown{num_unknowns: usize},
     RplLuserChannels{num_channels: usize},
-    RplLuserMe{num_clients: usize},
-    RplLocalUsers{num_clients: usize, max_clients_seen: usize},
-    RplGlobalUsers{num_clients: usize, max_clients_seen: usize},
+    RplLuserMe{num_users: usize},
+    RplLocalUsers{num_users: usize, max_users_seen: usize},
+    RplGlobalUsers{num_users: usize, max_users_seen: usize},
 
     RplVersion{comments: String},
 
@@ -23,6 +23,7 @@ pub enum ReplyCode {
     ErrNoMotd,
     ErrNoNicknameGiven,
     ErrErroneusNickname{nick: String},
+    ErrNicknameInUse{nick: String},
     ErrNeedMoreParams{cmd: String},
     ErrAlreadyRegistered,
 }
@@ -35,15 +36,15 @@ pub fn make_reply_msg(state: &ServerState, client_nick: &str, reply_type: ReplyC
         ReplyCode::RplMyInfo => ("004", vec!(state.settings.server_name.clone(), env!("CARGO_PKG_VERSION").to_owned()) , format!("")),
         ReplyCode::RplIsSupport{features} => ("005", features , format!("are supported by this server")),
 
-        ReplyCode::RplLuserClient{num_users, num_invisibles} => ("251", vec!(),  format!("There are {} users and {} invisible on 1 servers", num_users, num_invisibles)),
+        ReplyCode::RplLuserClient{num_visibles, num_invisibles} => ("251", vec!(),  format!("There are {} users and {} invisible on 1 servers", num_visibles, num_invisibles)),
         ReplyCode::RplLuserOp{num_ops} => ("252", vec!(num_ops.to_string()),  format!("operator(s) online")),
         ReplyCode::RplLuserUnknown{num_unknowns} => ("253", vec!(num_unknowns.to_string()),  format!("unknown connection(s)")),
         ReplyCode::RplLuserChannels{num_channels} => ("254", vec!(num_channels.to_string()),  format!("channels formed")),
-        ReplyCode::RplLuserMe{num_clients} => ("255", vec!(),  format!("I have {} clients and 1 servers", num_clients)),
-        ReplyCode::RplLocalUsers{num_clients, max_clients_seen} => ("265", vec!(num_clients.to_string(), max_clients_seen.to_string()),
-                                                                   format!("Current local users {}, max {}", num_clients, max_clients_seen)),
-        ReplyCode::RplGlobalUsers{num_clients, max_clients_seen} => ("266", vec!(num_clients.to_string(), max_clients_seen.to_string()),
-                                                                    format!("Current global users {}, max {}", num_clients, max_clients_seen)),
+        ReplyCode::RplLuserMe{num_users} => ("255", vec!(),  format!("I have {} clients and 1 servers", num_users)),
+        ReplyCode::RplLocalUsers{num_users, max_users_seen} => ("265", vec!(num_users.to_string(), max_users_seen.to_string()),
+                                                                   format!("Current local users {}, max {}", num_users, max_users_seen)),
+        ReplyCode::RplGlobalUsers{num_users, max_users_seen} => ("266", vec!(num_users.to_string(), max_users_seen.to_string()),
+                                                                    format!("Current global users {}, max {}", num_users, max_users_seen)),
 
         ReplyCode::RplVersion{comments} => ("351", vec!(env!("CARGO_PKG_VERSION").to_owned(), state.settings.server_name.clone()),  comments),
 
@@ -52,6 +53,7 @@ pub fn make_reply_msg(state: &ServerState, client_nick: &str, reply_type: ReplyC
         ReplyCode::ErrNoMotd{} => ("422", vec!() , format!("No MOTD set.")),
         ReplyCode::ErrNoNicknameGiven => ("431", vec!() , format!("No nickname given")),
         ReplyCode::ErrErroneusNickname{nick} => ("432", vec!(nick) , format!("Erroneous nickname")),
+        ReplyCode::ErrNicknameInUse{nick} => ("433", vec!(nick) , format!("Nickname is already in use.")),
         ReplyCode::ErrNeedMoreParams{cmd} => ("461", vec!(cmd) , format!("Not enough parameters")),
         ReplyCode::ErrAlreadyRegistered => ("462", vec!() , format!("You may not reregister")),
     };

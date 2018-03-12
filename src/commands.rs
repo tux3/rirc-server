@@ -15,7 +15,7 @@ enum CommandNamespace {
     Normal,
 }
 
-pub type CommandHandler = Fn(Arc<ServerState>, Client, Message) -> Box<Future<Item=Client, Error=Error>  + Send> + Sync;
+pub type CommandHandler = Fn(Arc<ServerState>, &mut Client, Message) -> Box<Future<Item=(), Error=Error>  + Send> + Sync;
 
 pub struct Command {
     pub name: &'static str,
@@ -51,7 +51,7 @@ macro_rules! command_error {
         {
             match $client.get_nick() {
                 Some(nick) => Box::new($client.send(make_reply_msg(&$state, &nick, $err))),
-                None => Box::new(future::ok($client)),
+                None => Box::new(future::ok(())),
             }
         }
     };
@@ -86,7 +86,7 @@ pub fn is_command_available(cmd: &Command, client: &Client) -> bool {
     }
 }
 
-pub fn handle_nick(state: Arc<ServerState>, mut client: Client, msg: Message) -> Box<Future<Item=Client, Error=Error>  + Send> {
+pub fn handle_nick(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
     let old_extended_prefix = client.get_extended_prefix();
     let new_nick = match msg.params.get(0) {
         Some(nick) => nick,
@@ -94,7 +94,11 @@ pub fn handle_nick(state: Arc<ServerState>, mut client: Client, msg: Message) ->
     };
     if !is_valid_nick(state.settings.max_name_length, new_nick) {
         let cur_nick = client.get_nick().unwrap_or("*".to_owned());
-        return Box::new(client.send(make_reply_msg(&state, &cur_nick, ReplyCode::ErrErroneusNickname{nick: new_nick.clone()})));
+        return client.send(make_reply_msg(&state, &cur_nick, ReplyCode::ErrErroneusNickname{nick: new_nick.clone()}));
+    }
+
+    if state.users.lock().expect("State users lock broken").contains_key(&new_nick.to_ascii_uppercase()) {
+        return command_error!(state, client, ReplyCode::ErrNicknameInUse{nick: new_nick.clone()});
     }
 
     match client.status {
@@ -105,29 +109,30 @@ pub fn handle_nick(state: Arc<ServerState>, mut client: Client, msg: Message) ->
     return if let ClientStatus::Unregistered{..} = client.status {
         client.try_finish_registration(state.clone())
     } else if old_extended_prefix.is_some() {
-        Box::new(client.send(Message {
+        client.send(Message {
             tags: Vec::new(),
             source: old_extended_prefix,
             command: "NICK".to_owned(),
             params: vec!(new_nick.clone()),
-        }))
+        })
     } else {
-        Box::new(future::ok(client))
+        Box::new(future::ok(()))
     }
 }
 
-pub fn handle_user(state: Arc<ServerState>, mut client: Client, msg: Message) -> Box<Future<Item=Client, Error=Error>  + Send> {
+pub fn handle_user(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
     let username = match msg.params.get(0) {
         Some(username) => match make_valid_username(state.settings.max_name_length, username) {
             Some(username) => username,
             None => {
                 let nick = client.get_nick().unwrap_or("*".to_owned());
-                return Box::new(client.send(Message {
+                client.send(Message {
                     tags: Vec::new(),
                     source: Some(state.settings.server_name.clone()),
                     command: "NOTICE".to_owned(),
                     params: vec!(nick, "*** Your username is invalid. Please make sure that your username contains only alphanumeric characters.".to_owned()),
-                }).and_then(|client| client.close_with_error( "Invalid username")));
+                });
+                return client.close_with_error( "Invalid username");
             },
         },
         None => return command_error!(state, client, ReplyCode::ErrNeedMoreParams{cmd: msg.command}),
@@ -148,11 +153,11 @@ pub fn handle_user(state: Arc<ServerState>, mut client: Client, msg: Message) ->
     client.try_finish_registration(state)
 }
 
-pub fn handle_notice(_: Arc<ServerState>, client: Client, _: Message) -> Box<Future<Item=Client, Error=Error>  + Send> {
-    Box::new(future::ok(client))
+pub fn handle_notice(_: Arc<ServerState>, _: &mut Client, _: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
+    Box::new(future::ok(()))
 }
 
-pub fn handle_version(state: Arc<ServerState>, client: Client, msg: Message) -> Box<Future<Item=Client, Error=Error>  + Send> {
+pub fn handle_version(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
     if let Some(target) = msg.params.get(0) {
         if target != &state.settings.server_name {
             return command_error!(state, client, ReplyCode::ErrNoSuchServer{server: target.clone()});
@@ -160,13 +165,11 @@ pub fn handle_version(state: Arc<ServerState>, client: Client, msg: Message) -> 
     };
 
     let nick = client.get_nick().unwrap_or("*".to_owned());
-    Box::new(
-        client.send(make_reply_msg(&state, &nick, ReplyCode::RplVersion {comments: String::new()}))
-            .and_then(move |client| client.send_issupport(&state))
-    )
+    client.send(make_reply_msg(&state, &nick, ReplyCode::RplVersion {comments: String::new()}));
+    client.send_issupport(&state)
 }
 
-pub fn handle_lusers(state: Arc<ServerState>, client: Client, msg: Message) -> Box<Future<Item=Client, Error=Error>  + Send> {
+pub fn handle_lusers(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
     if let Some(target) = msg.params.get(0) {
         if target != &state.settings.server_name {
             return command_error!(state, client, ReplyCode::ErrNoSuchServer{server: target.clone()});
@@ -176,7 +179,7 @@ pub fn handle_lusers(state: Arc<ServerState>, client: Client, msg: Message) -> B
     client.send_lusers(&state)
 }
 
-pub fn handle_motd(state: Arc<ServerState>, client: Client, msg: Message) -> Box<Future<Item=Client, Error=Error>  + Send> {
+pub fn handle_motd(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
     if let Some(target) = msg.params.get(0) {
         if target != &state.settings.server_name {
             return command_error!(state, client, ReplyCode::ErrNoSuchServer{server: target.clone()});

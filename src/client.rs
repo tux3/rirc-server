@@ -8,7 +8,8 @@ use message_stream::MessageStream;
 use futures::{Stream, Sink, Future, future};
 use server::ServerState;
 use reply_codes::{ReplyCode, make_reply_msg};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::cell::Cell;
 
 pub struct ClientUnregisteredState {
     pub nick: Option<String>,
@@ -45,15 +46,15 @@ pub struct ClientDuplex {
 }
 
 impl ClientDuplex {
-    pub fn new(socket: TcpStream) -> ClientDuplex {
+    pub fn new(server_state: Arc<ServerState>, socket: TcpStream) -> ClientDuplex {
         let addr = socket.peer_addr().unwrap();
         let (socket_r, socket_w) = socket.split();
         let stream = Box::new(MessageStream::new(BufReader::new(socket_r)));
-        let sink = Box::new(MessageSink::new(socket_w));
         ClientDuplex {
             stream,
             client: Client {
-                sink,
+                sink: Mutex::new(Cell::new(Some(Box::new(MessageSink::new(socket_w))))),
+                server_state,
                 addr,
                 status: ClientStatus::Unregistered(ClientUnregisteredState::new()),
             },
@@ -62,9 +63,24 @@ impl ClientDuplex {
 }
 
 pub struct Client {
-    sink: Box<Sink<SinkItem=Message, SinkError=Error> + Send>,
+    sink: Mutex<Cell<Option<Box<Sink<SinkItem=Message, SinkError=Error> + Send + Sync>>>>,
+    server_state: Arc<ServerState>,
     pub addr: SocketAddr,
     pub status: ClientStatus,
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        self.server_state.clients.lock().expect("State client lock")
+            .remove(&self.addr.to_string()).expect("Dropped client was not in client list!");
+        match self.status {
+            ClientStatus::Unregistered(_) => (),
+            ClientStatus::Normal(ClientNormalState{ref nick, ..}) => {
+                self.server_state.users.lock().expect("State users lock")
+                    .remove(&nick.to_ascii_uppercase()).expect("Dropped client was registered, but not in users list!");
+            },
+        };
+    }
 }
 
 impl Client {
@@ -88,29 +104,28 @@ impl Client {
         Some(nick + "!~" + &username + "@" + &self.addr.ip().to_string())
     }
 
-    /// Sends an arbitray message to the client
-    pub fn send(self, msg: Message) -> Box<Future<Item=Client, Error=Error> + Send> {
-        let Client{sink, addr, status} = self;
-        Box::new(sink.send(msg).and_then(move |sink| {
-            Ok(Client{
-                sink,
-                addr,
-                status,
-            })
-        }))
+    /// Sends an arbitrary message to the client
+    pub fn send(&self, msg: Message) -> Box<Future<Item=(), Error=Error> + Send> {
+        let sink_guard = self.sink.lock().unwrap();
+        let sink = sink_guard.take().unwrap();
+        sink_guard.set(match sink.send(msg).wait() {
+            Ok(sink) => Some(sink),
+            Err(e) => return Box::new(future::err(e)),
+        });
+        Box::new(future::ok(()))
     }
 
     /// Sends a series of messages in order to the client
-    pub fn send_all(self, msgs: &[Message]) -> Box<Future<Item=Client, Error=Error> + Send> {
-        let client = Box::new(future::ok(self));
-        msgs.iter().fold(client, move |client, msg| {
-            let msg = msg.clone();
-            Box::new(client.and_then(|c| c.send(msg)))
+    pub fn send_all(&self, msgs: &[Message]) -> Box<Future<Item=(), Error=Error> + Send> {
+        let client: &Self = self;
+
+        msgs.iter().fold(Box::new(future::ok(())), move |fut, msg| {
+            Box::new(fut.join(client.send(msg.clone())).map(|_| ()))
         })
     }
 
     /// Sends RPL_ISSUPPORT feature advertisment messages to the client
-    pub fn send_issupport(self, state: &ServerState) -> Box<Future<Item=Client, Error=Error> + Send> {
+    pub fn send_issupport(&self, state: &ServerState) -> Box<Future<Item=(), Error=Error> + Send> {
         let nick = match self.status {
             ClientStatus::Unregistered(_) => panic!("send_issupport called on unregistered client!"),
             ClientStatus::Normal(ClientNormalState{ref nick, ..}) => nick.clone(),
@@ -133,33 +148,34 @@ impl Client {
     }
 
     /// Sends RPL_LUSER* replies to the client
-    pub fn send_lusers(self, state: &ServerState) -> Box<Future<Item=Client, Error=Error> + Send> {
+    pub fn send_lusers(&self, state: &ServerState) -> Box<Future<Item=(), Error=Error> + Send> {
         let nick = match self.status {
             ClientStatus::Unregistered(_) => panic!("send_luser called on unregistered client!"),
             ClientStatus::Normal(ClientNormalState{ref nick, ..}) => nick.clone(),
         };
 
-        // TODO: Track and send real numbers!
-        let num_users = 0;
-        let num_invisibles = 0;
-        let num_ops = 0;
-        let num_unknowns = 0;
+        // TODO: Track the number of channels!
+        // TODO: Track invisibles, so we can substract them from the visible users count
         let num_channels = 0;
-        let num_clients = 0;
-        let max_clients_seen = num_clients;
+        let num_users = state.users.lock().expect("State users lock broken").len();
+        let max_users_seen = num_users;
+        let num_ops = 0;
+        let num_invisibles = 0;
+        let num_visibles = num_users - num_invisibles;
+        let num_unknowns = state.clients.lock().expect("State clients lock broken").len() - num_users;
         self.send_all(&[
-            make_reply_msg(state, &nick, ReplyCode::RplLuserClient {num_users, num_invisibles}),
+            make_reply_msg(state, &nick, ReplyCode::RplLuserClient {num_visibles, num_invisibles}),
             make_reply_msg(state, &nick, ReplyCode::RplLuserOp {num_ops}),
             make_reply_msg(state, &nick, ReplyCode::RplLuserUnknown {num_unknowns}),
             make_reply_msg(state, &nick, ReplyCode::RplLuserChannels {num_channels}),
-            make_reply_msg(state, &nick, ReplyCode::RplLuserMe {num_clients}),
-            make_reply_msg(state, &nick, ReplyCode::RplLocalUsers {num_clients, max_clients_seen}),
-            make_reply_msg(state, &nick, ReplyCode::RplGlobalUsers {num_clients, max_clients_seen}),
+            make_reply_msg(state, &nick, ReplyCode::RplLuserMe {num_users}),
+            make_reply_msg(state, &nick, ReplyCode::RplLocalUsers {num_users, max_users_seen}),
+            make_reply_msg(state, &nick, ReplyCode::RplGlobalUsers {num_users, max_users_seen}),
         ])
     }
 
     /// Sends a MOTD reply to the client
-    pub fn send_motd(self, state: &ServerState) -> Box<Future<Item=Client, Error=Error> + Send> {
+    pub fn send_motd(&self, state: &ServerState) -> Box<Future<Item=(), Error=Error> + Send> {
         let nick = match self.status {
             ClientStatus::Unregistered(_) => panic!("send_motd called on unregistered client!"),
             ClientStatus::Normal(ClientNormalState{ref nick, ..}) => nick.clone(),
@@ -169,9 +185,9 @@ impl Client {
     }
 
     /// Sends an ERROR message and closes down the connection
-    pub fn close_with_error(self, explanation: &str) -> Box<Future<Item=Client, Error=Error> + Send> {
+    pub fn close_with_error(&mut self, explanation: &str) -> Box<Future<Item=(), Error=Error> + Send> {
         let explanation = explanation.to_owned();
-        Box::new(self.sink.send(Message{
+        Box::new(self.send(Message{
             tags: Vec::new(),
             source: None,
             command: "ERROR".to_owned(),
@@ -182,32 +198,43 @@ impl Client {
     }
 
     /// If the client is ready, completes the registration process
-    pub fn try_finish_registration(self, state: Arc<ServerState>) -> Box<Future<Item=Client, Error=Error> + Send> {
-        let (nick, username, realname) = match self.status {
+    pub fn try_finish_registration(&mut self, state: Arc<ServerState>) -> Box<Future<Item=(), Error=Error> + Send> {
+        let cur_nick: String;
+        let registered_status = match self.status {
             ClientStatus::Unregistered(ClientUnregisteredState {
                                            nick: Some(ref nick),
                                            username: Some(ref username),
-                                           realname: Some(ref realname) })
-            => (nick.clone(), username.clone(), realname.clone()),
-            _ => return Box::new(future::ok(self)),
+                                           realname: Some(ref realname) }) => {
+                cur_nick = nick.clone();
+                ClientStatus::Normal(ClientNormalState{nick: nick.clone(), username: username.clone(), realname: realname.clone()})
+            },
+            _ => return Box::new(future::ok(())),
         };
 
-        Box::new(Client {
-            sink: self.sink,
-            addr: self.addr,
-            status: ClientStatus::Normal(ClientNormalState{nick: nick.clone(), username, realname}),
-        }.send_all(&[
-            make_reply_msg(&state, &nick, ReplyCode::RplWelcome),
-            make_reply_msg(&state, &nick, ReplyCode::RplYourHost),
-            make_reply_msg(&state, &nick, ReplyCode::RplCreated),
-            make_reply_msg(&state, &nick, ReplyCode::RplMyInfo),
-        ]).and_then(move |client| {
-            client.send_issupport(&state).map(|client| (client, state))
-        }).and_then(move |(client, state)| {
-            client.send_lusers(&state).map(|client| (client, state))
-        }).and_then(move |(client, state)| {
-            client.send_motd(&state)
-        })
-        )
+        let weak_self = match state.clients.lock().expect("Failed to lock clients vector").get(&self.addr.to_string()) {
+            Some(weak) => weak.clone(),
+            None => return Box::new(future::err(Error::new(ErrorKind::Other, "User completed registration, but is not in the client list!"))),
+        };
+
+        {
+            let casemapped_nick = cur_nick.to_ascii_uppercase();
+            let mut users_map = state.users.lock().expect("Failed to lock users vector");
+            if users_map.contains_key(&casemapped_nick) {
+                return self.close_with_error("Overridden");
+            }
+            let old_user = users_map.insert(casemapped_nick, weak_self);
+            debug_assert!(old_user.is_none());
+            self.status = registered_status;
+        }
+
+        self.send_all(&[
+            make_reply_msg(&state, &cur_nick, ReplyCode::RplWelcome),
+            make_reply_msg(&state, &cur_nick, ReplyCode::RplYourHost),
+            make_reply_msg(&state, &cur_nick, ReplyCode::RplCreated),
+            make_reply_msg(&state, &cur_nick, ReplyCode::RplMyInfo),
+        ]);
+        self.send_issupport(&state);
+        self.send_lusers(&state);
+        self.send_motd(&state)
     }
 }
