@@ -86,7 +86,7 @@ pub fn handle_part(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, ms
     let mut send_futs = Vec::new();
     let chanlist = match msg.params.get(0) {
         Some(chanlist) => chanlist.split(','),
-        None => return command_error!(state, client, ReplyCode::ErrNeedMoreParams{cmd: "JOIN".to_owned()}),
+        None => return command_error!(state, client, ReplyCode::ErrNeedMoreParams{cmd: "PART".to_owned()}),
     }.filter(|chan_name| {
         if !chan_name.starts_with("#") {
             send_futs.push(command_error!(state, client, ReplyCode::ErrNoSuchChannel{channel: chan_name.to_string()}));

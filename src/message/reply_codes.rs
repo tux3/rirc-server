@@ -32,6 +32,7 @@ pub enum ReplyCode {
     ErrNoNicknameGiven,
     ErrErroneusNickname{nick: String},
     ErrNicknameInUse{nick: String},
+    ErrNotOnChannel{channel: String},
     ErrNeedMoreParams{cmd: String},
     ErrAlreadyRegistered,
 }
@@ -69,6 +70,7 @@ pub fn make_reply_msg(state: &ServerState, client_nick: &str, reply_type: ReplyC
         ReplyCode::ErrNoNicknameGiven => ("431", vec!() , Some(format!("No nickname given"))),
         ReplyCode::ErrErroneusNickname{nick} => ("432", vec!(nick) , Some(format!("Erroneous nickname"))),
         ReplyCode::ErrNicknameInUse{nick} => ("433", vec!(nick) , Some(format!("Nickname is already in use."))),
+        ReplyCode::ErrNotOnChannel {channel} => ("442", vec!(channel) , Some(format!("You're not on that channel"))),
         ReplyCode::ErrNeedMoreParams{cmd} => ("461", vec!(cmd) , Some(format!("Not enough parameters"))),
         ReplyCode::ErrAlreadyRegistered => ("462", vec!() , Some(format!("You may not reregister"))),
     };

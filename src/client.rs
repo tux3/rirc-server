@@ -287,7 +287,8 @@ impl Client {
         let mut channels_guard = self.channels.write().expect("User channels write lock");
         let channel = match channels_guard.remove(&channel_name.to_ascii_uppercase()).and_then(|weak| weak.upgrade()) {
             Some(channel) => channel,
-            None => return Box::new(future::err(Error::new(ErrorKind::NotFound, "Couldn't find channel to part"))),
+            None => return self.send(make_reply_msg(&self.server_state, &self.get_nick().unwrap(),
+                                                    ReplyCode::ErrNotOnChannel{channel: channel_name.to_owned()})),
         };
         drop(channels_guard);
 
