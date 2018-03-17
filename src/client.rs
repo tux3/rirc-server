@@ -101,7 +101,7 @@ impl Client {
     pub fn get_extended_prefix(&self) -> Option<String> {
         let nick = self.get_nick()?;
         let username = self.get_username()?;
-        Some(nick + "!~" + &username + "@" + &self.addr.ip().to_string())
+        Some(nick + "!" + &username + "@" + &self.addr.ip().to_string())
     }
 
     /// Sends an arbitrary message to the client
