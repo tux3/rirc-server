@@ -56,24 +56,37 @@ pub fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg:
         Some(msg_text) => msg_text,
         None => return command_error!(state, client, ReplyCode::ErrNoTextToSend),
     };
-    let reply = Message {
-        tags: Vec::new(),
-        source: Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!")),
-        command: "PRIVMSG".to_owned(),
-        params: vec!(msg_text.to_owned()),
-    };
 
-    // TODO: If the target starts with #, treat it as a channel
-
-    if target.to_ascii_uppercase() == client.get_nick().expect("PRIVMSG sent by user without a nick!").to_ascii_uppercase() {
-        client.send(reply)
+    if let Some(channel_ref) = state.channels.lock().expect("State channels lock broken").get(&target.to_ascii_uppercase()) {
+        let channel_lock = channel_ref.clone();
+        let channel_guard = channel_lock.read().expect("Channel lock broken");
+        channel_guard.send(Message {
+            tags: Vec::new(),
+            source: Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!")),
+            command: "PRIVMSG".to_owned(),
+            params: vec!(channel_guard.name.to_owned(), msg_text.to_owned()),
+        }, Some(client.addr.to_string()))
+    } else if target.to_ascii_uppercase() == client.get_nick().expect("PRIVMSG sent by user without a nick!").to_ascii_uppercase() {
+        let nick = client.get_nick().unwrap().to_owned();
+        client.send(Message {
+            tags: Vec::new(),
+            source: Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!")),
+            command: "PRIVMSG".to_owned(),
+            params: vec!(nick, msg_text.to_owned()),
+        })
     } else if let Some(target_user) = state.users.lock().expect("State users lock broken").get(&target.to_ascii_uppercase()) {
         let target_user = match target_user.upgrade() {
             Some(target_user) => target_user,
             None => return command_error!(state, client, ReplyCode::ErrNoSuchNick{nick: target.clone()}),
         };
         let target_user = target_user.read().expect("User read lock broken");
-        target_user.send(reply)
+        let nick = target_user.get_nick().unwrap().to_owned();
+        target_user.send(Message {
+            tags: Vec::new(),
+            source: Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!")),
+            command: "PRIVMSG".to_owned(),
+            params: vec!(nick, msg_text.to_owned()),
+        })
     } else {
         return command_error!(state, client, ReplyCode::ErrNoSuchNick{nick: target.clone()});
     }
@@ -91,7 +104,7 @@ pub fn handle_quit(_: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Messag
         source: Some(client.get_extended_prefix().unwrap()),
         command: "QUIT".to_owned(),
         params: vec!(reason.clone()),
-    }).wait().ok();
+    }, true).wait().ok();
 
     let mut channels = client.channels.write().expect("Client channels write lock broken");
     channels.clear();

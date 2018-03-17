@@ -84,7 +84,7 @@ impl Drop for Client {
                     source: Some(self.get_extended_prefix().unwrap()),
                     command: "QUIT".to_owned(),
                     params: vec!("Quit".to_owned()),
-                }).wait().ok();
+                }, false).wait().ok();
 
                 self.server_state.users.lock().expect("State users lock")
                     .remove(&nick.to_ascii_uppercase()).expect("Dropped client was registered, but not in users list!");
@@ -137,11 +137,13 @@ impl Client {
         })
     }
 
-    /// Broadcasts a message to all users of all channels this user is in, and to the user itself
-    pub fn broadcast(&self, message: Message) -> Box<Future<Item=(), Error=Error> + Send> {
+    /// Broadcasts a message to all users of all channels this user is in, and optionally to the user itself
+    pub fn broadcast(&self, message: Message, include_self: bool) -> Box<Future<Item=(), Error=Error> + Send> {
         let mut users_sent_to = HashSet::new();
-        users_sent_to.insert(self.addr.to_string());
-        self.send(message.clone()).wait().ok();
+        if include_self {
+            users_sent_to.insert(self.addr.to_string());
+            self.send(message.clone()).wait().ok();
+        }
 
         let channels_guard = self.channels.read().expect("User channels read lock");
         for channel_weak in channels_guard.values() {
@@ -298,7 +300,7 @@ impl Client {
             source: Some(self.get_extended_prefix().expect("part called on a user without a prefix!")),
             command: "PART".to_owned(),
             params: vec!(channel_guard.name.to_owned()),
-        });
+        }, None);
         drop(channel_guard);
 
         let channel_guard = channel.write().expect("Channel write lock");

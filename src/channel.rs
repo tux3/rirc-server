@@ -39,7 +39,7 @@ impl Channel {
         msgs
     }
 
-    pub fn send(&self, message: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
+    pub fn send(&self, message: Message, exclude_user_addr: Option<String>) -> Box<Future<Item=(), Error=Error>  + Send> {
         let users_guard = self.users.read().expect("Channel users lock broken");
         let futs = users_guard.values().map(|user| {
             let user = match user.upgrade() {
@@ -47,7 +47,11 @@ impl Channel {
                 None => return Box::new(future::ok(())) as Box<Future<Item=(), Error=Error>  + Send>,
             };
             let user_guard = user.read().expect("User read lock broken");
-            user_guard.send(message.clone())
+            if exclude_user_addr.is_some() && exclude_user_addr.as_ref().unwrap() == &user_guard.addr.to_string() {
+                Box::new(future::ok(()))
+            } else {
+                user_guard.send(message.clone())
+            }
         });
         Box::new(future::join_all(futs.collect::<Vec<_>>()).map(|_| ()))
     }

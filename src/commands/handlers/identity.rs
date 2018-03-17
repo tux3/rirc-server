@@ -63,13 +63,13 @@ pub fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, ms
         let mut users_map = state.users.lock().expect("Failed to lock users vector");
         let old_user = users_map.remove(&old_nick.unwrap().to_ascii_uppercase());
         users_map.insert(new_nick.to_ascii_uppercase(), old_user.unwrap());
-        
+
         client.broadcast(Message {
             tags: Vec::new(),
             source: old_extended_prefix,
             command: "NICK".to_owned(),
             params: vec!(new_nick.clone()),
-        })
+        }, true)
     }
 }
 
