@@ -203,7 +203,7 @@ impl Client {
 
         // TODO: Track the number of channels!
         // TODO: Track invisibles, so we can substract them from the visible users count
-        let num_channels = 0;
+        let num_channels = state.channels.lock().expect("State channels lock broken").len();
         let num_users = state.users.lock().expect("State users lock broken").len();
         let max_users_seen = num_users;
         let num_ops = 0;
