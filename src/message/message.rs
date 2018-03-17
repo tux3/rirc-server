@@ -93,7 +93,7 @@ impl Message {
 
             for (i, param) in self.params.iter().enumerate() {
                 if i == self.params.len() - 1 &&
-                    (param.contains(" ") || param.is_empty()) {
+                    (param.contains(" ") || param.contains(":") || param.is_empty()) {
                     line = line + " :" + param;
                 } else {
                     debug_assert!(!param.contains(" "));
@@ -218,6 +218,7 @@ mod tests {
         check("foo bar baz", true, &[], None, "foo", &["bar", "baz"]);
         check("foo :bar baz", true, &[], None, "foo", &["bar baz"]);
         check("foo bar :baz qux", true, &[], None, "foo", &["bar", "baz qux"]);
+        check("Chin up! ::]", true, &[], None, "Chin", &["up!", ":]"]);
     }
 
     #[test]
