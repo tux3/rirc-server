@@ -34,7 +34,7 @@ pub fn handle_version(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg:
 
     let nick = client.get_nick().unwrap_or("*".to_owned());
     client.send(make_reply_msg(&state, &nick, ReplyCode::RplVersion {comments: String::new()}));
-    client.send_issupport(&state)
+    client.send_issupport()
 }
 
 pub fn handle_lusers(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
@@ -45,7 +45,7 @@ pub fn handle_lusers(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: 
         }
     };
 
-    client.send_lusers(&state)
+    client.send_lusers()
 }
 
 pub fn handle_motd(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
@@ -56,7 +56,7 @@ pub fn handle_motd(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Me
         }
     };
 
-    client.send_motd(&state)
+    client.send_motd()
 }
 
 pub fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {

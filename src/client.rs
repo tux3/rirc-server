@@ -169,11 +169,12 @@ impl Client {
     }
 
     /// Sends RPL_ISSUPPORT feature advertisment messages to the client
-    pub fn send_issupport(&self, state: &ServerState) -> Box<Future<Item=(), Error=Error> + Send> {
+    pub fn send_issupport(&self) -> Box<Future<Item=(), Error=Error> + Send> {
         let nick = match self.status {
             ClientStatus::Unregistered(_) => panic!("send_issupport called on unregistered client!"),
             ClientStatus::Normal(ClientNormalState{ref nick, ..}) => nick.clone(),
         };
+        let state = &self.server_state;
 
         // For now we don't even need to split it into multiple messages of 12 params each
         let features = vec![
@@ -192,11 +193,12 @@ impl Client {
     }
 
     /// Sends RPL_LUSER* replies to the client
-    pub fn send_lusers(&self, state: &ServerState) -> Box<Future<Item=(), Error=Error> + Send> {
+    pub fn send_lusers(&self) -> Box<Future<Item=(), Error=Error> + Send> {
         let nick = match self.status {
             ClientStatus::Unregistered(_) => panic!("send_luser called on unregistered client!"),
             ClientStatus::Normal(ClientNormalState{ref nick, ..}) => nick.clone(),
         };
+        let state = &self.server_state;
 
         // TODO: Track the number of channels!
         // TODO: Track invisibles, so we can substract them from the visible users count
@@ -219,13 +221,13 @@ impl Client {
     }
 
     /// Sends a MOTD reply to the client
-    pub fn send_motd(&self, state: &ServerState) -> Box<Future<Item=(), Error=Error> + Send> {
+    pub fn send_motd(&self) -> Box<Future<Item=(), Error=Error> + Send> {
         let nick = match self.status {
             ClientStatus::Unregistered(_) => panic!("send_motd called on unregistered client!"),
             ClientStatus::Normal(ClientNormalState{ref nick, ..}) => nick.clone(),
         };
 
-        self.send(make_reply_msg(state, &nick, ReplyCode::ErrNoMotd))
+        self.send(make_reply_msg(&self.server_state, &nick, ReplyCode::ErrNoMotd))
     }
 
     /// Sends an ERROR message and closes down the connection
@@ -242,7 +244,7 @@ impl Client {
     }
 
     /// If the client is ready, completes the registration process
-    pub fn try_finish_registration(&mut self, state: &ServerState) -> Box<Future<Item=(), Error=Error> + Send> {
+    pub fn try_finish_registration(&mut self) -> Box<Future<Item=(), Error=Error> + Send> {
         let cur_nick: String;
         let registered_status = match self.status {
             ClientStatus::Unregistered(ClientUnregisteredState {
@@ -255,6 +257,7 @@ impl Client {
             _ => return Box::new(future::ok(())),
         };
 
+        let state = self.server_state.clone();
         let weak_self = match state.clients.lock().expect("Failed to lock clients vector").get(&self.addr.to_string()) {
             Some(weak) => weak.clone(),
             None => return Box::new(future::err(Error::new(ErrorKind::Other, "User completed registration, but is not in the client list!"))),
@@ -277,9 +280,9 @@ impl Client {
             make_reply_msg(&state, &cur_nick, ReplyCode::RplCreated),
             make_reply_msg(&state, &cur_nick, ReplyCode::RplMyInfo),
         ]);
-        self.send_issupport(&state);
-        self.send_lusers(&state);
-        self.send_motd(&state)
+        self.send_issupport();
+        self.send_lusers();
+        self.send_motd()
     }
 
     /// Quits a channel, assuming the channel exists and the user is in it

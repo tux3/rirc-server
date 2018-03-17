@@ -54,7 +54,7 @@ pub fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, ms
     };
 
     return if let ClientStatus::Unregistered{..} = client.status {
-        client.try_finish_registration(&state)
+        client.try_finish_registration()
     } else {
         drop(client);
         let mut client = client_lock.read().expect("Client read lock broken");
@@ -103,7 +103,7 @@ pub fn handle_user(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Me
         _ => return command_error!(state, client, ReplyCode::ErrAlreadyRegistered),
     };
 
-    client.try_finish_registration(&state)
+    client.try_finish_registration()
 }
 
 #[cfg(test)]
