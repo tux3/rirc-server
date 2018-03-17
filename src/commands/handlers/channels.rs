@@ -1,8 +1,7 @@
 use client::Client;
 use server::ServerState;
 use channel::{Channel};
-use message::Message;
-use reply_codes::{make_reply_msg, ReplyCode};
+use message::{Message, make_reply_msg, ReplyCode};
 use futures::{Future, future};
 use std::io::{Error};
 use std::collections::hash_map::{Entry};

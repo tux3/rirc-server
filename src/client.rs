@@ -1,12 +1,9 @@
 use tokio::net::TcpStream;
 use tokio::io::{AsyncRead};
-use message::Message;
-use message_sink::MessageSink;
-use message_stream::MessageStream;
+use message::{Message, MessageSink, MessageStream, ReplyCode, make_reply_msg};
 use channel::{Channel};
 use futures::{Stream, Sink, Future, future};
 use server::ServerState;
-use reply_codes::{ReplyCode, make_reply_msg};
 use std::sync::{Arc, Weak, Mutex, RwLock};
 use std::cell::Cell;
 use std::net::SocketAddr;

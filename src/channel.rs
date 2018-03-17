@@ -1,6 +1,5 @@
 use client::{Client};
-use message::{Message};
-use reply_codes::{ReplyCode, make_reply_msg};
+use message::{Message, ReplyCode, make_reply_msg};
 use std::sync::{Weak, RwLock};
 use server::ServerState;
 use std::collections::HashMap;

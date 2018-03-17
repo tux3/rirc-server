@@ -7,10 +7,8 @@ use futures::{Future, Stream, future};
 use chrono::{DateTime, Local};
 use std::io::{Error};
 use std::sync::{Arc, Weak, Mutex, RwLock};
-use message::Message;
-use commands::{COMMANDS};
-use reply_codes::{make_reply_msg, ReplyCode};
-use commands::is_command_available;
+use message::{Message, make_reply_msg, ReplyCode};
+use commands::{COMMANDS, is_command_available};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]

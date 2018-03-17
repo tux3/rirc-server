@@ -1,7 +1,6 @@
 use client::{Client, ClientStatus};
 use server::ServerState;
-use message::Message;
-use reply_codes::{make_reply_msg, ReplyCode};
+use message::{Message, make_reply_msg, ReplyCode};
 use futures::{Future, future};
 use std::io::{Error, ErrorKind};
 use std::sync::{Arc, RwLock};
