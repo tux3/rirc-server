@@ -23,6 +23,7 @@ pub struct Command {
 }
 
 pub const COMMANDS_LIST: &[Command] = &[
+    Command{name: "PING", permissions: CommandNamespace::Any, handler: handle_ping},
     Command{name: "NICK", permissions: CommandNamespace::Any, handler: handle_nick},
     Command{name: "USER", permissions: CommandNamespace::Any, handler: handle_user},
     Command{name: "NOTICE", permissions: CommandNamespace::Any, handler: handle_notice},

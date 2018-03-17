@@ -6,6 +6,20 @@ use futures::{Future, future};
 use std::io::{Error, ErrorKind};
 use std::sync::{Arc, RwLock};
 
+pub fn handle_ping(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
+    let client = client.read().expect("Client read lock broken");
+
+    let mut reply_params = msg.params.clone();
+    reply_params.insert(0, state.settings.server_name.clone());
+
+    client.send(Message {
+        tags: Vec::new(),
+        source: Some(state.settings.server_name.clone()),
+        command: "PONG".to_owned(),
+        params: reply_params,
+    })
+}
+
 pub fn handle_notice(_: Arc<ServerState>, _: Arc<RwLock<Client>>, _: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
     // TODO: Actually forward notices to other users and channels
     Box::new(future::ok(()))
