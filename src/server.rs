@@ -7,7 +7,7 @@ use futures::{Future, Stream, future};
 use chrono::{DateTime, Local};
 use std::io::{Error};
 use std::sync::{Arc, Weak, Mutex, RwLock};
-use message::{Message, make_reply_msg, ReplyCode};
+use message::{self, Message, make_reply_msg, ReplyCode};
 use commands::{COMMANDS, is_command_available};
 use std::collections::HashMap;
 
@@ -57,6 +57,13 @@ pub struct ServerState {
 
 impl ServerState {
     pub fn new(settings: ServerSettings) -> Arc<ServerState> {
+        let msg_breathing_room = 96; // Pretty arbitrary, helps avoid running into MAX_LENGTH.
+        assert!(settings.max_name_length < message::MAX_LENGTH - msg_breathing_room);
+        assert!(settings.max_channel_length < message::MAX_LENGTH - msg_breathing_room);
+        assert!(settings.max_topic_length < message::MAX_LENGTH - msg_breathing_room);
+        assert!(!settings.server_name.contains(" "));
+        assert!(!settings.network_name.contains(" "));
+
         Arc::new(ServerState{
             settings,
             creation_time: Local::now(),
