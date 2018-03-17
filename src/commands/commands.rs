@@ -34,6 +34,7 @@ pub const COMMANDS_LIST: &[Command] = &[
     Command{name: "JOIN", permissions: CommandNamespace::Normal, handler: handle_join},
     Command{name: "PART", permissions: CommandNamespace::Normal, handler: handle_part},
     Command{name: "QUIT", permissions: CommandNamespace::Normal, handler: handle_quit},
+    Command{name: "TOPIC", permissions: CommandNamespace::Normal, handler: handle_topic},
 ];
 
 lazy_static! {

@@ -6,9 +6,17 @@ use std::collections::HashMap;
 use futures::Future;
 use std::io::Error;
 use futures::future;
+use chrono::{DateTime, Local};
+
+pub struct Topic {
+    pub text: String,
+    pub set_by_host: String,
+    pub set_at: DateTime<Local>,
+}
 
 pub struct Channel {
     pub name: String, // Includes the # character
+    pub topic: Option<Topic>,
     pub users: RwLock<HashMap<String, Weak<RwLock<Client>>>>, // Client addr -> chan member
 }
 
@@ -16,12 +24,21 @@ impl Channel {
     pub fn new(name: String) -> Channel {
         Channel {
             name,
+            topic: None,
             users: RwLock::new(HashMap::new()),
         }
     }
 
+    /// Get a series of info messages to send after a client joins a channel
     pub fn get_join_msgs(&self, state: &ServerState, client_nick: &str) -> Vec<Message> {
         let mut msgs = Vec::new();
+        if let Some(ref topic) = self.topic {
+            msgs.push(make_reply_msg(state, client_nick,
+                                     ReplyCode::RplTopic{channel: self.name.clone(), text: topic.text.clone()}));
+            msgs.push(make_reply_msg(state, client_nick,
+                                     ReplyCode::RplTopicWhoTime{channel: self.name.clone(), who: topic.set_by_host.clone(), time: topic.set_at.clone()}));
+        }
+
         let users_guard = self.users.read().expect("Channel users read lock broken");
         let names = users_guard.values().map(|user| {
             user.upgrade().and_then(|user| {
@@ -38,6 +55,7 @@ impl Channel {
         msgs
     }
 
+    /// Sends a message to all members of a channel
     pub fn send(&self, message: Message, exclude_user_addr: Option<String>) -> Box<Future<Item=(), Error=Error>  + Send> {
         let users_guard = self.users.read().expect("Channel users lock broken");
         let futs = users_guard.values().map(|user| {

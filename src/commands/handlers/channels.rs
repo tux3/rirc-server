@@ -1,8 +1,9 @@
 use client::Client;
 use server::ServerState;
-use channel::{Channel};
+use channel::{Channel, Topic};
 use message::{Message, make_reply_msg, ReplyCode};
 use futures::{Future, future};
+use chrono::Local;
 use std::io::{Error};
 use std::collections::hash_map::{Entry};
 use std::sync::{Arc, RwLock};
@@ -101,4 +102,49 @@ pub fn handle_part(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, ms
     }
 
     Box::new(future::join_all(send_futs).map(|_| ()))
+}
+
+pub fn handle_topic(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
+    let client = client.read().expect("Client read lock broken");
+    let target_chan = match msg.params.get(0) {
+        Some(target_chan) => target_chan,
+        None => return command_error!(state, client, ReplyCode::ErrNeedMoreParams{cmd: "TOPIC".to_owned()}),
+    };
+    let topic_text = msg.params.get(1);
+
+    if let Some(channel_ref) = state.channels.lock().expect("State channels lock broken").get(&target_chan.to_ascii_uppercase()) {
+        let channel_lock = channel_ref.clone();
+        let mut channel_guard = channel_lock.write().expect("Channel lock broken");
+        let channel = channel_guard.name.clone();
+
+        if let Some(text) = topic_text {
+            if text.is_empty() {
+                channel_guard.topic = None;
+            } else {
+                channel_guard.topic = Some(Topic {
+                    text: text.clone(),
+                    set_by_host: client.get_extended_prefix().unwrap(),
+                    set_at: Local::now(),
+                });
+            }
+            channel_guard.send(Message{
+                tags: Vec::new(),
+                source: Some(client.get_extended_prefix().expect("TOPIC change by user without a prefix!")),
+                command: "TOPIC".to_owned(),
+                params: vec!(channel, text.to_owned()),
+            }, None)
+        } else {
+            let client_nick = client.get_nick().unwrap();
+            if let Some(ref topic) = channel_guard.topic {
+                client.send_all(&[
+                    make_reply_msg(&state, &client_nick, ReplyCode::RplTopic { channel: channel.clone(), text: topic.text.clone() }),
+                    make_reply_msg(&state, &client_nick, ReplyCode::RplTopicWhoTime { channel, who: topic.set_by_host.clone(), time: topic.set_at.clone() }),
+                ])
+            } else {
+                client.send(make_reply_msg(&state, &client_nick, ReplyCode::RplNoTopic { channel }))
+            }
+        }
+    } else {
+        return command_error!(state, client, ReplyCode::ErrNoSuchChannel{channel: target_chan.clone()});
+    }
 }

@@ -1,5 +1,6 @@
 use message::Message;
 use server::ServerState;
+use chrono::{DateTime, Local};
 
 pub enum ReplyCode {
     RplWelcome,
@@ -16,6 +17,9 @@ pub enum ReplyCode {
     RplLocalUsers{num_users: usize, max_users_seen: usize},
     RplGlobalUsers{num_users: usize, max_users_seen: usize},
 
+    RplNoTopic{channel: String},
+    RplTopic{channel: String, text: String},
+    RplTopicWhoTime{channel: String, who: String, time: DateTime<Local>},
     RplVersion{comments: String},
     /// This is a base reply, it does not include names since they may not fit in a single message.
     RplNameReply{symbol: char, channel: String},
@@ -55,6 +59,9 @@ pub fn make_reply_msg(state: &ServerState, client_nick: &str, reply_type: ReplyC
         ReplyCode::RplGlobalUsers{num_users, max_users_seen} => ("266", vec!(num_users.to_string(), max_users_seen.to_string()),
                                                                     Some(format!("Current global users {}, max {}", num_users, max_users_seen))),
 
+        ReplyCode::RplNoTopic{channel} => ("331", vec!(channel), Some(format!("No topic is set"))),
+        ReplyCode::RplTopic{channel, text} => ("332", vec!(channel), Some(text)),
+        ReplyCode::RplTopicWhoTime{channel, who, time} => ("333", vec!(channel, who, time.timestamp().to_string()), None),
         ReplyCode::RplVersion{comments} => ("351", vec!(env!("CARGO_PKG_VERSION").to_owned(), state.settings.server_name.clone()), Some(comments)),
         ReplyCode::RplNameReply{symbol, channel} => ("353", vec!(symbol.to_string(), channel), None),
         ReplyCode::RplEndOfNames{channel} => ("366", vec!(channel), Some(format!("End of /NAMES list"))),
