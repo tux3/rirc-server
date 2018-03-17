@@ -1,3 +1,8 @@
+use std::mem::replace;
+
+/// Maximum length of a serialized message in bytes
+pub const MAX_LENGTH: usize = 512;
+
 // A tag at the start of an IRC message
 #[derive(PartialEq, Debug, Clone)]
 pub struct MessageTag {
@@ -35,6 +40,37 @@ impl Message {
             command,
             params,
         }
+    }
+
+    /// If a message may have a very long trailing parameter, split it into multiple messages
+    pub fn split_trailing_args(base_msg: Message, params: Vec<String>, separator: &str) -> Vec<Message> {
+        let mut msgs = Vec::new();
+        let base_len = base_msg.to_line().len();
+
+        let max_param_len = MAX_LENGTH - base_len;
+        let mut next_trailing = String::new();
+        let mut params = params.into_iter().peekable();
+        while let Some(param) = params.next() {
+            let param_len = param.len() + separator.len();
+            if !next_trailing.is_empty() && next_trailing.len() + param_len >= max_param_len {
+                let mut next_msg = base_msg.clone();
+                next_msg.params.push(replace(&mut next_trailing, String::new()));
+                msgs.push(next_msg);
+            }
+
+            next_trailing += &param;
+            if params.peek().is_some() {
+                next_trailing += &separator;
+            }
+        }
+
+        if !next_trailing.is_empty() {
+            let mut next_msg = base_msg.clone();
+            next_msg.params.push(next_trailing);
+            msgs.push(next_msg);
+        }
+
+        msgs
     }
 
     pub fn to_line(&self) -> String {

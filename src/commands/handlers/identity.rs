@@ -5,57 +5,11 @@ use reply_codes::{make_reply_msg, ReplyCode};
 use futures::{Future, future};
 use regex::Regex;
 use std::io::{Error};
-use std::collections::HashMap;
-use std::sync::Arc;
-
-enum CommandNamespace {
-    /// Clients in any state can execute this command
-    Any,
-    /// Command can be used by normal users after registration
-    Normal,
-}
-
-pub type CommandHandler = fn(Arc<ServerState>, &mut Client, Message) -> Box<Future<Item=(), Error=Error>  + Send>;
-
-pub struct Command {
-    pub name: &'static str,
-    permissions: CommandNamespace,
-    pub handler: CommandHandler,
-}
-
-const COMMANDS_LIST: &[Command] = &[
-    Command{name: "NICK", permissions: CommandNamespace::Any, handler: handle_nick},
-    Command{name: "USER", permissions: CommandNamespace::Any, handler: handle_user},
-    Command{name: "NOTICE", permissions: CommandNamespace::Any, handler: handle_notice},
-    Command{name: "VERSION", permissions: CommandNamespace::Normal, handler: handle_version},
-    Command{name: "LUSERS", permissions: CommandNamespace::Normal, handler: handle_lusers},
-    Command{name: "MOTD", permissions: CommandNamespace::Normal, handler: handle_motd},
-    Command{name: "PRIVMSG", permissions: CommandNamespace::Normal, handler: handle_privmsg},
-];
+use std::sync::{Arc, RwLock};
 
 lazy_static! {
-    pub static ref COMMANDS: HashMap<&'static str, &'static Command> = {
-        let mut m = HashMap::new();
-        for cmd in COMMANDS_LIST {
-            m.insert(cmd.name, cmd);
-        }
-        m
-    };
-
     static ref VALID_NICKNAME_REGEX: Regex = Regex::new(r"^[[:alpha:]\[\\\]\^_`\{\|\}][[:alnum:]\[\\\]\^_`\{\|\}\-]*$").unwrap();
     static ref BAD_USERNAME_CHARS_REGEX: Regex = Regex::new(r"[@\x00\x0D\x0A\x20]").unwrap();
-}
-
-/// Sending an error reply if the client has a nick
-macro_rules! command_error {
-    ( $state:expr, $client:expr, $err:expr ) => {
-        {
-            match $client.get_nick() {
-                Some(nick) => Box::new($client.send(make_reply_msg(&$state, &nick, $err))),
-                None => Box::new(future::ok(())),
-            }
-        }
-    };
 }
 
 fn is_valid_nick(max_len: usize, nick: &str) -> bool {
@@ -77,18 +31,8 @@ fn make_valid_username(max_len: usize, username: &str) -> Option<String> {
     }
 }
 
-pub fn is_command_available(cmd: &Command, client: &Client) -> bool {
-    match cmd.permissions {
-        CommandNamespace::Any => true,
-        CommandNamespace::Normal => match client.status {
-            ClientStatus::Normal(_) => true,
-            _ => false,
-        },
-    }
-}
-
-pub fn handle_nick(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    let old_extended_prefix = client.get_extended_prefix();
+pub fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
+    let mut client = client_lock.write().expect("Client write lock broken");
     let new_nick = match msg.params.get(0) {
         Some(nick) => nick,
         None => return command_error!(state, client, ReplyCode::ErrNoNicknameGiven),
@@ -102,26 +46,35 @@ pub fn handle_nick(state: Arc<ServerState>, client: &mut Client, msg: Message) -
         return command_error!(state, client, ReplyCode::ErrNicknameInUse{nick: new_nick.clone()});
     }
 
+    let old_extended_prefix = client.get_extended_prefix();
+    let old_nick = client.get_nick();
+
     match client.status {
         ClientStatus::Unregistered(ref mut state) => state.nick = Some(new_nick.clone()),
         ClientStatus::Normal(ref mut state) => state.nick = new_nick.clone(),
     };
 
     return if let ClientStatus::Unregistered{..} = client.status {
-        client.try_finish_registration(state.clone())
-    } else if old_extended_prefix.is_some() {
-        client.send(Message {
+        client.try_finish_registration(&state)
+    } else {
+        drop(client);
+        let mut client = client_lock.read().expect("Client read lock broken");
+
+        let mut users_map = state.users.lock().expect("Failed to lock users vector");
+        let old_user = users_map.remove(&old_nick.unwrap().to_ascii_uppercase());
+        users_map.insert(new_nick.to_ascii_uppercase(), old_user.unwrap());
+        
+        client.broadcast(Message {
             tags: Vec::new(),
             source: old_extended_prefix,
             command: "NICK".to_owned(),
             params: vec!(new_nick.clone()),
         })
-    } else {
-        Box::new(future::ok(()))
     }
 }
 
-pub fn handle_user(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
+pub fn handle_user(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
+    let client: &mut Client = &mut client.write().expect("Client write lock broken");
     let username = match msg.params.get(0) {
         Some(username) => match make_valid_username(state.settings.max_name_length, username) {
             Some(username) => username,
@@ -151,80 +104,13 @@ pub fn handle_user(state: Arc<ServerState>, client: &mut Client, msg: Message) -
         _ => return command_error!(state, client, ReplyCode::ErrAlreadyRegistered),
     };
 
-    client.try_finish_registration(state)
-}
-
-pub fn handle_notice(_: Arc<ServerState>, _: &mut Client, _: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    Box::new(future::ok(()))
-}
-
-pub fn handle_version(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    if let Some(target) = msg.params.get(0) {
-        if target != &state.settings.server_name {
-            return command_error!(state, client, ReplyCode::ErrNoSuchServer{server: target.clone()});
-        }
-    };
-
-    let nick = client.get_nick().unwrap_or("*".to_owned());
-    client.send(make_reply_msg(&state, &nick, ReplyCode::RplVersion {comments: String::new()}));
-    client.send_issupport(&state)
-}
-
-pub fn handle_lusers(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    if let Some(target) = msg.params.get(0) {
-        if target != &state.settings.server_name {
-            return command_error!(state, client, ReplyCode::ErrNoSuchServer{server: target.clone()});
-        }
-    };
-
-    client.send_lusers(&state)
-}
-
-pub fn handle_motd(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    if let Some(target) = msg.params.get(0) {
-        if target != &state.settings.server_name {
-            return command_error!(state, client, ReplyCode::ErrNoSuchServer{server: target.clone()});
-        }
-    };
-
-    client.send_motd(&state)
-}
-
-pub fn handle_privmsg(state: Arc<ServerState>, client: &mut Client, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    let target = match msg.params.get(0) {
-        Some(nick) => nick,
-        None => return command_error!(state, client, ReplyCode::ErrNoRecipient{cmd: "PRIVMSG".to_owned()}),
-    };
-    let msg_text = match msg.params.get(1) {
-        Some(msg_text) => msg_text,
-        None => return command_error!(state, client, ReplyCode::ErrNoTextToSend),
-    };
-    let reply = Message {
-        tags: Vec::new(),
-        source: Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!")),
-        command: "PRIVMSG".to_owned(),
-        params: vec!(msg_text.to_owned()),
-    };
-
-    // TODO: If the target starts with #, treat it as a channel
-
-    if target.to_ascii_uppercase() == client.get_nick().expect("PRIVMSG sent by user without a nick!").to_ascii_uppercase() {
-        client.send(reply)
-    } else if let Some(target_user) = state.users.lock().expect("State users lock broken").get(&target.to_ascii_uppercase()) {
-        let target_user = match target_user.upgrade() {
-            Some(target_user) => target_user,
-            None => return command_error!(state, client, ReplyCode::ErrNoSuchNick{nick: target.clone()}),
-        };
-        let target_user = target_user.read().expect("User read lock broken");
-        target_user.send(reply)
-    } else {
-        return command_error!(state, client, ReplyCode::ErrNoSuchNick{nick: target.clone()});
-    }
+    client.try_finish_registration(&state)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use commands::COMMANDS_LIST;
     use std::collections::HashSet;
 
     fn is_valid_username(max_len: usize, username: &str) -> bool {

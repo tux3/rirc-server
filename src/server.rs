@@ -1,4 +1,5 @@
 use client::{ClientDuplex, Client, ClientStatus};
+use channel::{Channel};
 use std::net::SocketAddr;
 use tokio::{self};
 use tokio::net::{TcpListener};
@@ -29,6 +30,8 @@ pub struct ServerSettings {
     pub max_topic_length: usize,
     /// Maximum number of #channels a client may join
     pub chan_limit: usize,
+    /// Whether regular users can create channels
+    pub allow_channel_creation: bool,
 }
 
 impl Default for ServerSettings {
@@ -41,6 +44,7 @@ impl Default for ServerSettings {
             max_channel_length: 50,
             max_topic_length: 390,
             chan_limit: 120,
+            allow_channel_creation: true,
         }
     }
 }
@@ -49,6 +53,7 @@ pub struct ServerState {
     pub settings: ServerSettings,
     pub clients: Mutex<HashMap<String, Weak<RwLock<Client>>>>, // Peer addr -> Client
     pub users: Mutex<HashMap<String, Weak<RwLock<Client>>>>, // Nickname -> Registered Client
+    pub channels: Mutex<HashMap<String, Arc<RwLock<Channel>>>>, // Channel name -> Channel
     pub creation_time: DateTime<Local>,
 }
 
@@ -59,6 +64,7 @@ impl ServerState {
             creation_time: Local::now(),
             clients: Mutex::new(HashMap::new()),
             users: Mutex::new(HashMap::new()),
+            channels: Mutex::new(HashMap::new()),
         })
     }
 }
@@ -113,7 +119,7 @@ impl Server {
     fn process_message(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=Arc<RwLock<Client>>, Error=Error> + Send> {
         let fut = if let Some(command) = COMMANDS.get(&msg.command.to_ascii_uppercase() as &str) {
             if is_command_available(&command, &client_lock.read().unwrap()) {
-                (command.handler)(state.clone(), &mut client_lock.write().unwrap(), msg)
+                (command.handler)(state.clone(), client_lock.clone(), msg)
             } else {
                 Box::new(future::ok(()))
             }

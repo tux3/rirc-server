@@ -30,7 +30,7 @@ impl<T: AsyncRead + BufRead> Stream for MessageStream<T> {
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                 return Ok(Async::NotReady)
             },
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e),
         };
         if n == 0 && self.msg_line.len() == 0 {
             return Ok(None.into())

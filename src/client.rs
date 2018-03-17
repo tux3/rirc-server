@@ -1,15 +1,17 @@
-use std::net::SocketAddr;
-use std::io::{Error, ErrorKind, BufReader};
 use tokio::net::TcpStream;
 use tokio::io::{AsyncRead};
 use message::Message;
 use message_sink::MessageSink;
 use message_stream::MessageStream;
+use channel::{Channel};
 use futures::{Stream, Sink, Future, future};
 use server::ServerState;
 use reply_codes::{ReplyCode, make_reply_msg};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Weak, Mutex, RwLock};
 use std::cell::Cell;
+use std::net::SocketAddr;
+use std::io::{Error, ErrorKind, BufReader};
+use std::collections::{HashMap, HashSet};
 
 pub struct ClientUnregisteredState {
     pub nick: Option<String>,
@@ -57,6 +59,7 @@ impl ClientDuplex {
                 server_state,
                 addr,
                 status: ClientStatus::Unregistered(ClientUnregisteredState::new()),
+                channels: RwLock::new(HashMap::new()),
             },
         }
     }
@@ -67,19 +70,29 @@ pub struct Client {
     server_state: Arc<ServerState>,
     pub addr: SocketAddr,
     pub status: ClientStatus,
+    pub channels: RwLock<HashMap<String, Weak<RwLock<Channel>>>>,
 }
 
 impl Drop for Client {
     fn drop(&mut self) {
-        self.server_state.clients.lock().expect("State client lock")
-            .remove(&self.addr.to_string()).expect("Dropped client was not in client list!");
+
         match self.status {
             ClientStatus::Unregistered(_) => (),
             ClientStatus::Normal(ClientNormalState{ref nick, ..}) => {
+                self.broadcast(Message {
+                    tags: Vec::new(),
+                    source: Some(self.get_extended_prefix().unwrap()),
+                    command: "QUIT".to_owned(),
+                    params: vec!("Quit".to_owned()),
+                }).wait().ok();
+
                 self.server_state.users.lock().expect("State users lock")
                     .remove(&nick.to_ascii_uppercase()).expect("Dropped client was registered, but not in users list!");
             },
         };
+
+        self.server_state.clients.lock().expect("State client lock")
+            .remove(&self.addr.to_string()).expect("Dropped client was not in client list!");
     }
 }
 
@@ -122,6 +135,38 @@ impl Client {
         msgs.iter().fold(Box::new(future::ok(())), move |fut, msg| {
             Box::new(fut.join(client.send(msg.clone())).map(|_| ()))
         })
+    }
+
+    /// Broadcasts a message to all users of all channels this user is in, and to the user itself
+    pub fn broadcast(&self, message: Message) -> Box<Future<Item=(), Error=Error> + Send> {
+        let mut users_sent_to = HashSet::new();
+        users_sent_to.insert(self.addr.to_string());
+        self.send(message.clone()).wait().ok();
+
+        let channels_guard = self.channels.read().expect("User channels read lock");
+        for channel_weak in channels_guard.values() {
+            let channel_lock = match channel_weak.upgrade() {
+                Some(channel) => channel,
+                None => continue,
+            };
+            let channel_guard = channel_lock.read().expect("Channel read lock");
+
+            let channel_users = channel_guard.users.read().expect("Channel users read lock");
+            for (user_addr, weak_user) in channel_users.iter() {
+                if !users_sent_to.insert(user_addr.to_string()) {
+                    continue
+                }
+
+                let user_lock = match weak_user.upgrade() {
+                    Some(user) => user,
+                    None => continue,
+                };
+                let user_guard = user_lock.read().expect("User read lock");
+                user_guard.send(message.clone()).wait().ok();
+            }
+        }
+
+        Box::new(future::ok(()))
     }
 
     /// Sends RPL_ISSUPPORT feature advertisment messages to the client
@@ -198,7 +243,7 @@ impl Client {
     }
 
     /// If the client is ready, completes the registration process
-    pub fn try_finish_registration(&mut self, state: Arc<ServerState>) -> Box<Future<Item=(), Error=Error> + Send> {
+    pub fn try_finish_registration(&mut self, state: &ServerState) -> Box<Future<Item=(), Error=Error> + Send> {
         let cur_nick: String;
         let registered_status = match self.status {
             ClientStatus::Unregistered(ClientUnregisteredState {
@@ -236,5 +281,35 @@ impl Client {
         self.send_issupport(&state);
         self.send_lusers(&state);
         self.send_motd(&state)
+    }
+
+    /// Quits a channel, assuming the channel exists and the user is in it
+    pub fn part(&self, channel_name: &str) -> Box<Future<Item=(), Error=Error> + Send> {
+        let mut channels_guard = self.channels.write().expect("User channels write lock");
+        let channel = match channels_guard.remove(&channel_name.to_ascii_uppercase()).and_then(|weak| weak.upgrade()) {
+            Some(channel) => channel,
+            None => return Box::new(future::err(Error::new(ErrorKind::NotFound, "Couldn't find channel to part"))),
+        };
+        drop(channels_guard);
+
+        let channel_guard = channel.read().expect("Channel read lock");
+        let fut = channel_guard.send(Message {
+            tags: Vec::new(),
+            source: Some(self.get_extended_prefix().expect("part called on a user without a prefix!")),
+            command: "PART".to_owned(),
+            params: vec!(channel_guard.name.to_owned()),
+        });
+        drop(channel_guard);
+
+        let channel_guard = channel.write().expect("Channel write lock");
+        let mut channel_users = channel_guard.users.write().expect("Channel users write lock");
+        channel_users.remove(&self.addr.to_string());
+
+        if channel_users.len() == 0 {
+            let mut server_channels = self.server_state.channels.lock().expect("State channels lock");
+            server_channels.remove(&channel_guard.name.to_ascii_uppercase());
+        }
+
+        fut
     }
 }
