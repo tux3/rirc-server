@@ -94,6 +94,10 @@ impl Drop for Client {
 }
 
 impl Client {
+    pub fn get_host(&self) -> String {
+        self.addr.ip().to_string()
+    }
+
     pub fn get_nick(&self) -> Option<String> {
         match self.status {
             ClientStatus::Unregistered(ref state) => state.nick.clone(),
@@ -108,10 +112,17 @@ impl Client {
         }
     }
 
+    pub fn get_realname(&self) -> Option<String> {
+        match self.status {
+            ClientStatus::Unregistered(ref state) => state.realname.clone(),
+            ClientStatus::Normal(ref state) => Some(state.realname.clone()),
+        }
+    }
+
     pub fn get_extended_prefix(&self) -> Option<String> {
         let nick = self.get_nick()?;
         let username = self.get_username()?;
-        Some(nick + "!" + &username + "@" + &self.addr.ip().to_string())
+        Some(nick + "!" + &username + "@" + &self.get_host())
     }
 
     /// Sends an arbitrary message to the client
