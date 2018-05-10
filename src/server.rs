@@ -92,7 +92,7 @@ impl Server {
         tokio::spawn(fut);
     }
 
-    fn process_message(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=Arc<RwLock<Client>>, Error=Error> + Send> {
+    fn process_message(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> impl Future<Item=Arc<RwLock<Client>>, Error=Error> {
         let fut = if let Some(command) = COMMANDS.get(&msg.command.to_ascii_uppercase() as &str) {
             if is_command_available(&command, &client_lock.read().unwrap()) {
                 (command.handler)(state.clone(), client_lock.clone(), msg)
@@ -114,6 +114,6 @@ impl Server {
             }
         };
 
-        Box::new(fut.map(|()| client_lock))
+        fut.map(|()| client_lock)
     }
 }
