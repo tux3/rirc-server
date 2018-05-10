@@ -10,5 +10,7 @@ mod server;
 mod channel;
 mod message;
 mod commands;
+mod settings;
 
-pub use server::{Server, ServerSettings};
+pub use server::Server;
+pub use settings::ServerSettings;
