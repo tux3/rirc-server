@@ -11,6 +11,9 @@ mod channel;
 mod message;
 mod commands;
 mod settings;
+mod callbacks;
 
 pub use server::Server;
 pub use settings::ServerSettings;
+pub use callbacks::ServerCallbacks;
+pub use client::Client;

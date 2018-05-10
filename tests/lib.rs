@@ -1,6 +1,6 @@
 extern crate rirc_server;
 
-use rirc_server::{Server, ServerSettings};
+use rirc_server::{Server, ServerSettings, ServerCallbacks};
 
 #[test]
 fn can_instantiate_server() {
@@ -8,5 +8,5 @@ fn can_instantiate_server() {
         listen_addr: "0.0.0.0:6667".parse().unwrap(),
         server_name: "test-server".to_owned(),
         ..Default::default()
-    });
+    }, ServerCallbacks::default());
 }

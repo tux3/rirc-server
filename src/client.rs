@@ -72,6 +72,7 @@ pub struct Client {
 
 impl Drop for Client {
     fn drop(&mut self) {
+        (self.server_state.callbacks.on_client_disconnect)(&self.addr).ok();
 
         match self.status {
             ClientStatus::Unregistered(_) => (),
@@ -285,6 +286,12 @@ impl Client {
             self.status = registered_status;
         }
 
+        match (state.callbacks.on_client_registering)(self) {
+            Ok(true) => (),
+            Ok(false) => return self.close_with_error("Rejected by server"),
+            Err(e) => return self.close_with_error(&e.to_string()),
+        };
+
         self.send_all(&[
             make_reply_msg(&state, &cur_nick, ReplyCode::RplWelcome),
             make_reply_msg(&state, &cur_nick, ReplyCode::RplYourHost),
@@ -293,7 +300,11 @@ impl Client {
         ]);
         self.send_issupport();
         self.send_lusers();
-        self.send_motd()
+        self.send_motd();
+
+        (state.callbacks.on_client_registered)(self).ok();
+
+        Box::new(future::ok(()))
     }
 
     /// Quits a channel, assuming the channel exists and the user is in it

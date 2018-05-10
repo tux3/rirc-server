@@ -1,4 +1,5 @@
 use settings::ServerSettings;
+use callbacks::ServerCallbacks;
 use client::{ClientDuplex, Client, ClientStatus};
 use channel::{Channel};
 use tokio::{self};
@@ -13,6 +14,7 @@ use std::collections::HashMap;
 
 pub struct ServerState {
     pub settings: ServerSettings,
+    pub callbacks: ServerCallbacks,
     pub clients: Mutex<HashMap<String, Weak<RwLock<Client>>>>, // Peer addr -> Client
     pub users: Mutex<HashMap<String, Weak<RwLock<Client>>>>, // Nickname -> Registered Client
     pub channels: Mutex<HashMap<String, Arc<RwLock<Channel>>>>, // Channel name -> Channel
@@ -20,7 +22,7 @@ pub struct ServerState {
 }
 
 impl ServerState {
-    pub fn new(settings: ServerSettings) -> Arc<ServerState> {
+    pub fn new(settings: ServerSettings, callbacks: ServerCallbacks) -> Arc<ServerState> {
         let msg_breathing_room = 96; // Pretty arbitrary, helps avoid running into MAX_LENGTH.
         assert!(settings.max_name_length < message::MAX_LENGTH - msg_breathing_room);
         assert!(settings.max_channel_length < message::MAX_LENGTH - msg_breathing_room);
@@ -30,6 +32,7 @@ impl ServerState {
 
         Arc::new(ServerState{
             settings,
+            callbacks,
             creation_time: Local::now(),
             clients: Mutex::new(HashMap::new()),
             users: Mutex::new(HashMap::new()),
@@ -43,9 +46,9 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(settings: ServerSettings) -> Server {
+    pub fn new(settings: ServerSettings, callbacks: ServerCallbacks) -> Server {
         Server {
-            state: ServerState::new(settings),
+            state: ServerState::new(settings, callbacks),
         }
     }
 
@@ -72,6 +75,10 @@ impl Server {
                                                                 .insert(addr.to_string(), Arc::downgrade(&client));
             debug_assert!(old_client.is_none());
         }
+        match (state.callbacks.on_client_connect)(&addr) {
+            Ok(true) => (),
+            _ => return,
+        };
 
         let fut = client_duplex.stream
         .fold(client, move |client, msg| {
