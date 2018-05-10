@@ -54,6 +54,7 @@ pub fn handle_join(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, ms
         }
 
         let channel_guard = channel_arc.read().expect("Channel read lock broken");
+        send_futs.push(client.send_all(&channel_guard.get_join_msgs(&state, &client.get_nick().unwrap())));
         let mut chan_users_guard = channel_guard.users.write().expect("Channel users lock broken");
         chan_users_guard.insert(client.addr.to_string(), Arc::downgrade(&client_lock));
 
@@ -74,9 +75,6 @@ pub fn handle_join(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, ms
             send_futs.push(chan_user_guard.send(join_msg.clone()));
         }
         drop(chan_users_guard);
-
-        let client = client_lock.read().expect("Client read lock broken");
-        send_futs.push(client.send_all(&channel_guard.get_join_msgs(&state, &client.get_nick().unwrap())));
     }
 
     Box::new(future::join_all(send_futs).map(|_| ()))

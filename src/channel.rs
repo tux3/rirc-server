@@ -30,6 +30,7 @@ impl Channel {
     }
 
     /// Get a series of info messages to send after a client joins a channel
+    /// Call this before adding the user to the channel, or the user's nick will appear twice!
     pub fn get_join_msgs(&self, state: &ServerState, client_nick: &str) -> Vec<Message> {
         let mut msgs = Vec::new();
         if let Some(ref topic) = self.topic {
@@ -40,7 +41,7 @@ impl Channel {
         }
 
         let users_guard = self.users.read().expect("Channel users read lock broken");
-        let names = users_guard.values().map(|user| {
+        let mut names = users_guard.values().map(|user| {
             user.upgrade().and_then(|user| {
                 user.read().unwrap().get_nick()
             })
@@ -48,6 +49,7 @@ impl Channel {
             .filter(|name_opt| name_opt.is_some())
             .map(|name_opt| name_opt.unwrap())
             .collect::<Vec<_>>();
+        names.push(client_nick.to_owned());
         let base_msg = make_reply_msg(state, client_nick, ReplyCode::RplNameReply{symbol: '=', channel: self.name.clone()});
 
         msgs.extend(Message::split_trailing_args(base_msg, names, " "));

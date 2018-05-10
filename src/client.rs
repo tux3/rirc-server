@@ -9,6 +9,7 @@ use std::cell::Cell;
 use std::net::SocketAddr;
 use std::io::{Error, ErrorKind, BufReader};
 use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::{Entry};
 
 pub struct ClientUnregisteredState {
     pub nick: Option<String>,
@@ -305,6 +306,68 @@ impl Client {
         (state.callbacks.on_client_registered)(self).ok();
 
         Box::new(future::ok(()))
+    }
+
+    /// Joins a channel, assuming it doesn't violate any rules
+    pub fn join(&mut self, chan_name: &str) -> Box<Future<Item=(), Error=Error> + Send> {
+        if !chan_name.starts_with("#") {
+            return Box::new(future::err(Error::new(ErrorKind::InvalidInput, "Channels must start with a #")));
+        }
+        if self.channels.read().unwrap().len() >= self.server_state.settings.chan_limit {
+            return Box::new(future::err(Error::new(ErrorKind::Other, "Cannot join, too many channels")));
+        }
+
+        let mut channels = self.server_state.channels.lock().expect("Channels lock broken");
+        let channel_arc = match channels.entry(chan_name.to_ascii_uppercase()) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => {
+                entry.insert(Arc::new(RwLock::new(Channel::new(chan_name.to_owned())))).clone()
+            },
+        };
+
+        {
+            let mut client_chans_guard = self.channels.write().expect("Client channels write lock broken");
+            match client_chans_guard.entry(chan_name.to_ascii_uppercase()) {
+                Entry::Occupied(_) => return Box::new(future::ok(())),
+                Entry::Vacant(entry) => {
+                    entry.insert(Arc::downgrade(&channel_arc)).clone();
+                },
+            };
+        }
+
+        let weak_self = match self.server_state.clients.lock().expect("Failed to lock clients vector").get(&self.addr.to_string()) {
+            Some(weak) => weak.clone(),
+            None => return Box::new(future::err(Error::new(ErrorKind::Other, "User completed registration, but is not in the client list!"))),
+        };
+
+        let channel_guard = channel_arc.read().expect("Channel read lock broken");
+        let chan_join_msgs = channel_guard.get_join_msgs(&self.server_state, &self.get_nick().unwrap());
+        let mut chan_users_guard = channel_guard.users.write().expect("Channel users lock broken");
+        chan_users_guard.insert(self.addr.to_string(), weak_self);
+
+        let join_msg = Message {
+            tags: Vec::new(),
+            source: Some(self.get_extended_prefix().expect("JOIN sent by user without a prefix!")),
+            command: "JOIN".to_owned(),
+            params: vec!(channel_guard.name.to_owned()),
+        };
+
+        let addr_string = self.addr.to_string();
+        for (chan_user_addr, chan_user_weak) in chan_users_guard.iter() {
+            if *chan_user_addr == addr_string {
+                continue
+            }
+            let chan_user = match chan_user_weak.upgrade() {
+                Some(user) => user,
+                None => continue,
+            };
+            let chan_user_guard = chan_user.read().expect("Chan user read lock broken");
+            chan_user_guard.send(join_msg.clone());
+        }
+        drop(chan_users_guard);
+
+        self.send(join_msg);
+        self.send_all(&chan_join_msgs)
     }
 
     /// Quits a channel, assuming the channel exists and the user is in it
