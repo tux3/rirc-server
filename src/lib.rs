@@ -17,3 +17,5 @@ pub use server::Server;
 pub use settings::ServerSettings;
 pub use callbacks::ServerCallbacks;
 pub use client::Client;
+pub use channel::Channel;
+pub use message::Message;

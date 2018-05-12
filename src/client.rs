@@ -65,7 +65,7 @@ impl ClientDuplex {
 
 pub struct Client {
     sink: Mutex<Cell<Option<Box<Sink<SinkItem=Message, SinkError=Error> + Send + Sync>>>>,
-    server_state: Arc<ServerState>,
+    pub server_state: Arc<ServerState>,
     pub addr: SocketAddr,
     pub status: ClientStatus,
     pub channels: RwLock<HashMap<String, Weak<RwLock<Channel>>>>,
