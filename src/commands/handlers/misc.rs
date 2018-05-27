@@ -59,7 +59,7 @@ pub fn handle_motd(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Me
     client.send_motd()
 }
 
-pub fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
+pub fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error> + Send> {
     let client = client.read().expect("Client read lock broken");
     let target = match msg.params.get(0) {
         Some(nick) => nick,
@@ -73,6 +73,11 @@ pub fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg:
     if let Some(channel_ref) = state.channels.lock().expect("State channels lock broken").get(&target.to_ascii_uppercase()) {
         let channel_lock = channel_ref.clone();
         let channel_guard = channel_lock.read().expect("Channel lock broken");
+        match (state.callbacks.on_client_channel_message)(&client, &channel_guard, &msg) {
+            Ok(true) => (),
+            Ok(false) => return Box::new(future::ok(())),
+            Err(e) => return command_error!(state, client, ReplyCode::ErrCannotSendToChan{channel: target.clone(), reason: e.to_string()}),
+        }
         channel_guard.send(Message {
             tags: Vec::new(),
             source: Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!")),
