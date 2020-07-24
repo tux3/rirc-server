@@ -13,6 +13,7 @@ use crate::message::{Message, MessageSink, MessageStream, ReplyCode, make_reply_
 use crate::channel::{Channel};
 use crate::server::ServerState;
 use crate::errors::ChannelNotFoundError;
+use crate::mode::{UserMode, CHANMODES};
 
 pub struct ClientUnregisteredState {
     pub nick: Option<String>,
@@ -61,6 +62,7 @@ impl ClientDuplex {
                 addr,
                 status: ClientStatus::Unregistered(ClientUnregisteredState::new()),
                 channels: RwLock::new(HashMap::new()),
+                mode: Default::default(),
             },
         }
     }
@@ -72,6 +74,8 @@ pub struct Client {
     pub addr: SocketAddr,
     pub status: ClientStatus,
     pub channels: RwLock<HashMap<String, Weak<RwLock<Channel>>>>,
+
+    pub mode: UserMode,
 }
 
 impl Drop for Client {
@@ -191,7 +195,7 @@ impl Client {
         let features = vec![
             format!("CASEMAPPING=ascii"),
             format!("CHANLIMIT=#:{}", state.settings.chan_limit),
-            format!("CHANMODES=,,,"), // TODO: Actually support the most basic modes like +i
+            format!("CHANMODES={}", CHANMODES),
             format!("CHANNELLEN={}", state.settings.max_channel_length),
             format!("CHANTYPES=#"),
             format!("NETWORK={}", state.settings.network_name),

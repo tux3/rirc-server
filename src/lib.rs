@@ -8,6 +8,7 @@ mod commands;
 mod settings;
 mod callbacks;
 mod errors;
+mod mode;
 
 pub use crate::server::Server;
 pub use crate::settings::ServerSettings;

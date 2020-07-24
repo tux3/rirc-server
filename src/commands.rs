@@ -71,6 +71,7 @@ declare_commands!(
         {topic, CommandNamespace::Normal},
         {who, CommandNamespace::Normal},
         {whois, CommandNamespace::Normal},
+        {mode, CommandNamespace::Normal},
     ]
 );
 

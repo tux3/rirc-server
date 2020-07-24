@@ -9,6 +9,8 @@ use std::io::Error;
 use futures::future;
 use chrono::{DateTime, Local};
 use futures::executor::block_on;
+use std::time::{SystemTime, UNIX_EPOCH};
+use crate::mode::ChannelMode;
 
 pub struct Topic {
     pub text: String,
@@ -20,6 +22,8 @@ pub struct Channel {
     pub name: String, // Includes the # character
     pub topic: Option<Topic>,
     pub users: RwLock<HashMap<String, Weak<RwLock<Client>>>>, // Client addr -> chan member
+    pub creation_timestamp: u64,
+    pub mode: ChannelMode,
 }
 
 impl Channel {
@@ -28,6 +32,8 @@ impl Channel {
             name,
             topic: None,
             users: RwLock::new(HashMap::new()),
+            creation_timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            mode: Default::default(),
         }
     }
 

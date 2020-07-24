@@ -4,11 +4,12 @@ use crate::channel::{Channel, Topic};
 use crate::message::{Message, make_reply_msg, ReplyCode};
 use crate::errors::ChannelNotFoundError;
 use crate::commands::command_error;
+use crate::mode::BaseMode;
 use chrono::Local;
 use std::io::Error;
 use std::collections::hash_map::{Entry};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockWriteGuard};
 use std::error::Error as _;
 
 pub async fn handle_join(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
@@ -161,5 +162,97 @@ pub async fn handle_topic(state: Arc<ServerState>, client: Arc<RwLock<Client>>, 
         command_error(&state, &client, ReplyCode::ErrNoSuchChannel{channel: target_chan.clone()}).await?;
     };
 
+    Ok(())
+}
+
+async fn handle_user_mode(state: Arc<ServerState>, mut client: RwLockWriteGuard<'_, Client>,
+                          target: &str, modestring: Option<&String>) -> Result<(), Error> {
+    let client_nick = &client.get_nick().unwrap();
+
+    if let Some(modestring) = modestring {
+        let applied = match client.mode.apply_modestring(modestring) {
+            Ok(applied) => applied,
+            Err((applied, _)) => {
+                command_error(&state, &client, ReplyCode::ErrUModeUnknownFlag).await?;
+                applied
+            }
+        };
+
+        if !applied.is_empty() {
+            client.send(Message {
+                tags: Vec::new(),
+                source: Some(client_nick.to_owned()),
+                command: "MODE".to_owned(),
+                params: vec!(target.to_owned(), applied),
+            }).await?;
+        }
+    } else {
+        client.send(make_reply_msg(&state, &client_nick, ReplyCode::RplUModeIs { modestring: client.mode.to_string() })).await?;
+    }
+    Ok(())
+}
+
+async fn handle_channel_mode(state: Arc<ServerState>, client: RwLockWriteGuard<'_, Client>,
+                          channel_lock: Arc<RwLock<Channel>>,
+                          target: &str, modestring: Option<&String>) -> Result<(), Error> {
+    let client_nick = &client.get_nick().unwrap();
+    let mut channel = channel_lock.write().await;
+
+    if let Some(modestring) = modestring {
+        // TODO: Implement channel permissions (PREFIX), and check if user is authorized to change channel modes
+
+        let applied = match channel.mode.apply_modestring(modestring) {
+            Ok(applied) => applied,
+            Err((applied, mode)) => {
+                command_error(&state, &client, ReplyCode::ErrUnknownMode{mode}).await?;
+                applied
+            }
+        };
+
+        if !applied.is_empty() {
+            channel.send(Message {
+                tags: Vec::new(),
+                source: Some(client.get_extended_prefix().unwrap()),
+                command: "MODE".to_owned(),
+                params: vec!(target.to_owned(), applied),
+            }, None).await?;
+        }
+    } else {
+        client.send(make_reply_msg(&state, &client_nick, ReplyCode::RplChannelModeIs {
+            channel: channel.name.clone(),
+            modestring: channel.mode.to_string(),
+        })).await?;
+        client.send(make_reply_msg(&state, &client_nick, ReplyCode::RplCreationTime {
+            channel: channel.name.clone(),
+            timestamp: channel.creation_timestamp,
+        })).await?;
+    }
+    Ok(())
+}
+
+pub async fn handle_mode(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let client = client.write().await;
+    let client_nick = &client.get_nick().unwrap();
+
+    let target = match msg.params.get(0) {
+        Some(target) => target,
+        None => return command_error(&state, &client, ReplyCode::ErrNeedMoreParams{cmd: "MODE".to_owned()}).await,
+    };
+    let modestring = msg.params.get(1);
+
+    if target.starts_with('#') {
+        if let Some(channel_ref) = state.channels.lock().await.get(&target.to_ascii_uppercase()) {
+            let channel_lock = channel_ref.clone();
+            handle_channel_mode(state.clone(), client, channel_lock, target, modestring).await?;
+        } else {
+            command_error(&state, &client, ReplyCode::ErrNoSuchChannel{channel: target.clone()}).await?;
+        }
+    } else if target == client_nick {
+        handle_user_mode(state, client, target, modestring).await?;
+    } else if state.users.read().await.contains_key(target) {
+        command_error(&state, &client, ReplyCode::ErrUsersDontMatch).await?;
+    } else {
+        command_error(&state, &client, ReplyCode::ErrNoSuchNick{ nick: target.to_owned() }).await?;
+    }
     Ok(())
 }
