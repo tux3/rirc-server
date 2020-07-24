@@ -95,7 +95,7 @@ pub async fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>
             command: "PRIVMSG".to_owned(),
             params: vec!(nick, msg_text.to_owned()),
         }).await
-    } else if let Some(target_user) = state.users.lock().await.get(&target.to_ascii_uppercase()) {
+    } else if let Some(target_user) = state.users.read().await.get(&target.to_ascii_uppercase()) {
         let target_user = match target_user.upgrade() {
             Some(target_user) => target_user,
             None => return command_error(&state, &client, ReplyCode::ErrNoSuchNick{nick: target.clone()}).await,

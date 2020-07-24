@@ -18,7 +18,10 @@ pub enum ReplyCode {
     RplLocalUsers{num_users: usize, max_users_seen: usize},
     RplGlobalUsers{num_users: usize, max_users_seen: usize},
 
+    RplWhoisUser{nick: String, user: String, host: String, realname: String},
+    RplWhoisServer{nick: String, server: String, server_info: String},
     RplEndOfWho{mask: String},
+    RplEndOfWhois{masks: String},
     RplNoTopic{channel: String},
     RplTopic{channel: String, text: String},
     RplTopicWhoTime{channel: String, who: String, time: DateTime<Local>},
@@ -63,7 +66,10 @@ pub fn make_reply_msg(state: &ServerState, client_nick: &str, reply_type: ReplyC
         ReplyCode::RplGlobalUsers{num_users, max_users_seen} => ("266", vec!(num_users.to_string(), max_users_seen.to_string()),
                                                                     Some(format!("Current global users {}, max {}", num_users, max_users_seen))),
 
-        ReplyCode::RplEndOfWho{mask} => ("315", vec!(mask), Some(format!("End of WHO list"))),
+        ReplyCode::RplWhoisUser{nick, user, host, realname} => ("311", vec!(nick, user, host, "*".to_string()), Some(realname)),
+        ReplyCode::RplWhoisServer{nick, server, server_info} => ("312", vec!(nick, server), Some(server_info)),
+        ReplyCode::RplEndOfWho{mask} => ("315", vec!(mask), Some(format!("End of /WHO list"))),
+        ReplyCode::RplEndOfWhois{masks} => ("318", vec!(masks), Some(format!("End of /WHOIS list"))),
         ReplyCode::RplNoTopic{channel} => ("331", vec!(channel), Some(format!("No topic is set"))),
         ReplyCode::RplTopic{channel, text} => ("332", vec!(channel), Some(text)),
         ReplyCode::RplTopicWhoTime{channel, who, time} => ("333", vec!(channel, who, time.timestamp().to_string()), None),

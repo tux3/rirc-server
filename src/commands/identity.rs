@@ -43,7 +43,7 @@ pub async fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client
         return client.send(make_reply_msg(&state, &cur_nick, ReplyCode::ErrErroneusNickname{nick: new_nick.clone()})).await;
     }
 
-    if state.users.lock().await.contains_key(&new_nick.to_ascii_uppercase()) {
+    if state.users.read().await.contains_key(&new_nick.to_ascii_uppercase()) {
         return command_error(&state, &client, ReplyCode::ErrNicknameInUse{nick: new_nick.clone()}).await;
     }
 
@@ -61,7 +61,7 @@ pub async fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client
         drop(client);
         let client = client_lock.read().await;
 
-        let mut users_map = state.users.lock().await;
+        let mut users_map = state.users.write().await;
         let old_user = users_map.remove(&old_nick.unwrap().to_ascii_uppercase());
         users_map.insert(new_nick.to_ascii_uppercase(), old_user.unwrap());
 

@@ -88,7 +88,7 @@ impl Drop for Client {
                     params: vec!("Quit".to_owned()),
                 }, false))).ok();
 
-                block_on(self.server_state.users.lock())
+                block_on(self.server_state.users.write())
                     .remove(&nick.to_ascii_uppercase()).expect("Dropped client was registered, but not in users list!");
             },
         };
@@ -215,7 +215,7 @@ impl Client {
         // TODO: Track the number of channels!
         // TODO: Track invisibles, so we can substract them from the visible users count
         let num_channels = state.channels.lock().await.len();
-        let num_users = state.users.lock().await.len();
+        let num_users = state.users.read().await.len();
         let max_users_seen = num_users;
         let num_ops = 0;
         let num_invisibles = 0;
@@ -280,7 +280,7 @@ impl Client {
 
         {
             let casemapped_nick = cur_nick.to_ascii_uppercase();
-            let mut users_map = state.users.lock().await;
+            let mut users_map = state.users.write().await;
             if users_map.contains_key(&casemapped_nick) {
                 return self.close_with_error("Overridden").await;
             }

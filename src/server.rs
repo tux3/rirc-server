@@ -17,7 +17,7 @@ pub struct ServerState {
     pub settings: ServerSettings,
     pub callbacks: ServerCallbacks,
     pub clients: Mutex<HashMap<String, Weak<RwLock<Client>>>>, // Peer addr -> Client
-    pub users: Mutex<HashMap<String, Weak<RwLock<Client>>>>, // Nickname -> Registered Client
+    pub users: RwLock<HashMap<String, Weak<RwLock<Client>>>>, // Nickname -> Registered Client
     pub channels: Mutex<HashMap<String, Arc<RwLock<Channel>>>>, // Channel name -> Channel
     pub creation_time: DateTime<Local>,
 }
@@ -36,7 +36,7 @@ impl ServerState {
             callbacks,
             creation_time: Local::now(),
             clients: Mutex::new(HashMap::new()),
-            users: Mutex::new(HashMap::new()),
+            users: RwLock::new(HashMap::new()),
             channels: Mutex::new(HashMap::new()),
         })
     }

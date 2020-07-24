@@ -82,3 +82,53 @@ pub async fn handle_who(state: Arc<ServerState>, client: Arc<RwLock<Client>>, ms
     messages.push(make_reply_msg(&state, &client.get_nick().unwrap(), ReplyCode::RplEndOfWho{mask: mask.to_owned()}));
     client.send_all(&messages).await
 }
+
+pub async fn handle_whois(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let client = client.read().await;
+    let client_nick = &client.get_nick().expect("unregistered client sent a WHOIS");
+
+    // We don't handle the /whois <server> <nickmasks> syntax
+    if msg.params.len() != 1 {
+        return command_error(&state, &client, ReplyCode::ErrNeedMoreParams { cmd: "WHOIS".to_owned() }).await;
+    }
+
+    // We only reply to WHOIS for the first nickmask. Why? That's just what Freenode seems to do...
+    let mut users_matched = HashSet::new();
+    let masks = msg.params.get(0).unwrap();
+    if let Some(mask) = masks.split(',').next() {
+        let users_guard = state.users.read().await;
+        for (user_addr, weak_user) in users_guard.iter() {
+            if !users_matched.insert(user_addr.to_string()) {
+                continue
+            }
+
+            let user_lock = match weak_user.upgrade() {
+                Some(user) => user,
+                None => continue,
+            };
+            let user = user_lock.read().await;
+            if !user_matches_mask(&user, &mask) {
+                continue
+            }
+
+            client.send(make_reply_msg(&state, &client_nick, ReplyCode::RplWhoisUser{
+                nick: user.get_nick().unwrap(),
+                host: user.get_host(),
+                user: user.get_username().unwrap(),
+                realname: user.get_realname().unwrap(),
+            })).await?;
+            client.send(make_reply_msg(&state, &client_nick, ReplyCode::RplWhoisServer{
+                nick: user.get_nick().unwrap(),
+                server: state.settings.server_name.clone(),
+                server_info: state.settings.server_info.clone(),
+            })).await?;
+            client.send(make_reply_msg(&state, &client_nick, ReplyCode::RplEndOfWhois{masks: masks.to_owned()})).await?;
+            return Ok(());
+        }
+
+        client.send(make_reply_msg(&state, &client_nick, ReplyCode::ErrNoSuchNick{nick: mask.to_owned()})).await?;
+    }
+
+    client.send(make_reply_msg(&state, &client_nick, ReplyCode::RplEndOfWhois{masks: masks.to_owned()})).await?;
+    Ok(())
+}

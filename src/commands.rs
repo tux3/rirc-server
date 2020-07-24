@@ -70,6 +70,7 @@ declare_commands!(
         {quit, CommandNamespace::Normal},
         {topic, CommandNamespace::Normal},
         {who, CommandNamespace::Normal},
+        {whois, CommandNamespace::Normal},
     ]
 );
 

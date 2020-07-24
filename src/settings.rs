@@ -4,10 +4,12 @@ use std::net::SocketAddr;
 pub struct ServerSettings {
     /// Network address/port to listen on
     pub listen_addr: SocketAddr,
-    /// Name the server will use to identify itself
-    pub server_name: String,
     /// Advertised network name for this server
     pub network_name: String,
+    /// Name the server will use to identify itself
+    pub server_name: String,
+    /// Description of this server
+    pub server_info: String,
     /// Maximum length of nicknames and usernames
     /// Note that the madatory leading "~" in usernames counts towards this limit
     pub max_name_length: usize,
@@ -26,6 +28,7 @@ impl Default for ServerSettings {
         ServerSettings{
             listen_addr: "0.0.0.0:6667".parse().unwrap(),
             server_name: "rirc-server".to_owned(),
+            server_info: "Default server".to_owned(),
             network_name: "rIRC".to_owned(),
             max_name_length: 16,
             max_channel_length: 50,
