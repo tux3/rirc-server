@@ -216,13 +216,23 @@ impl Client {
         };
         let state = self.server_state.clone();
 
-        // TODO: Track the number of channels!
-        // TODO: Track invisibles, so we can substract them from the visible users count
+        let num_users;
+        let mut num_invisibles = 0;
+        {
+            let users = state.users.read().await;
+            num_users = users.len();
+            for weak_user in users.values() {
+                if let Some(user) = weak_user.upgrade() {
+                    if user.read().await.mode.invisible {
+                        num_invisibles += 1;
+                    }
+                }
+            }
+        }
+
         let num_channels = state.channels.lock().await.len();
-        let num_users = state.users.read().await.len();
         let max_users_seen = num_users;
         let num_ops = 0;
-        let num_invisibles = 0;
         let num_visibles = num_users - num_invisibles;
         let num_unknowns = state.clients.lock().await.len() - num_users;
         self.send_all(&[
@@ -262,8 +272,9 @@ impl Client {
         Err(Error::new(ErrorKind::Other, explanation))
     }
 
-    /// If the client is ready, completes the registration process
-    pub async fn try_finish_registration(&mut self) -> Result<(), Error> {
+    /// If the client is ready, try to go through the registration process
+    /// Returns true if we still need to finish registration (it is possible to "register" twice)
+    pub async fn try_begin_registration(&mut self) -> Result<bool, Error> {
         let cur_nick: String;
         let registered_status = match self.status {
             ClientStatus::Unregistered(ClientUnregisteredState {
@@ -273,7 +284,7 @@ impl Client {
                 cur_nick = nick.clone();
                 ClientStatus::Normal(ClientNormalState{nick: nick.clone(), username: username.clone(), realname: realname.clone()})
             },
-            _ => return Ok(()),
+            _ => return Ok(false),
         };
 
         let state = self.server_state.clone();
@@ -286,7 +297,8 @@ impl Client {
             let casemapped_nick = cur_nick.to_ascii_uppercase();
             let mut users_map = state.users.write().await;
             if users_map.contains_key(&casemapped_nick) {
-                return self.close_with_error("Overridden").await;
+                self.close_with_error("Overridden").await?;
+                unreachable!();
             }
             let old_user = users_map.insert(casemapped_nick, weak_self);
             debug_assert!(old_user.is_none());
@@ -295,10 +307,17 @@ impl Client {
 
         match (state.callbacks.on_client_registering)(self) {
             Ok(true) => (),
-            Ok(false) => return self.close_with_error("Rejected by server").await,
-            Err(e) => return self.close_with_error(&e.to_string()).await,
+            Ok(false) => self.close_with_error("Rejected by server").await?,
+            Err(e) => self.close_with_error(&e.to_string()).await?,
         };
 
+        Ok(true)
+    }
+
+    /// Complete the registration process
+    pub async fn finish_registration(&self) -> Result<(), Error> {
+        let cur_nick = self.get_nick().expect("Must have started registration");
+        let state = &self.server_state;
         self.send_all(&[
             make_reply_msg(&state, &cur_nick, ReplyCode::RplWelcome),
             make_reply_msg(&state, &cur_nick, ReplyCode::RplYourHost),

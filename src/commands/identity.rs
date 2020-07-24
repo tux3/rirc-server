@@ -56,7 +56,12 @@ pub async fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client
     };
 
     if let ClientStatus::Unregistered{..} = client.status {
-        client.try_finish_registration().await
+        let should_finish = client.try_begin_registration().await?;
+        drop(client);
+        if should_finish {
+            client_lock.read().await.finish_registration().await?;
+        }
+        Ok(())
     } else {
         drop(client);
         let client = client_lock.read().await;
@@ -74,8 +79,8 @@ pub async fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client
     }
 }
 
-pub async fn handle_user(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
-    let mut client = client.write().await;
+pub async fn handle_user(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let mut client = client_lock.write().await;
     let username = match msg.params.get(0) {
         Some(username) => match make_valid_username(state.settings.max_name_length, username) {
             Some(username) => username,
@@ -105,7 +110,12 @@ pub async fn handle_user(state: Arc<ServerState>, client: Arc<RwLock<Client>>, m
         _ => return command_error(&state, &client, ReplyCode::ErrAlreadyRegistered).await,
     };
 
-    client.try_finish_registration().await
+    let should_finish = client.try_begin_registration().await?;
+    drop(client);
+    if should_finish {
+        client_lock.read().await.finish_registration().await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
