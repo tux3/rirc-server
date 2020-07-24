@@ -9,7 +9,7 @@ use chrono::Local;
 use std::io::Error;
 use std::collections::hash_map::{Entry};
 use std::sync::Arc;
-use tokio::sync::{RwLock, RwLockWriteGuard};
+use tokio::sync::RwLock;
 use std::error::Error as _;
 
 pub async fn handle_join(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
@@ -56,8 +56,7 @@ pub async fn handle_join(state: Arc<ServerState>, client_lock: Arc<RwLock<Client
 
         let channel_guard = channel_arc.read().await;
         let client_nick = &client.get_nick().unwrap();
-        let msgs = &channel_guard.get_join_msgs(&state, client_nick).await;
-        client.send_all(msgs).await?;
+
         let mut chan_users_guard = channel_guard.users.write().await;
         chan_users_guard.insert(client.addr.to_string(), Arc::downgrade(&client_lock));
 
@@ -67,7 +66,6 @@ pub async fn handle_join(state: Arc<ServerState>, client_lock: Arc<RwLock<Client
             command: "JOIN".to_owned(),
             params: vec!(channel_guard.name.to_owned()),
         };
-        drop(client);
 
         for chan_user_weak in chan_users_guard.values() {
             let chan_user = match chan_user_weak.upgrade() {
@@ -78,6 +76,9 @@ pub async fn handle_join(state: Arc<ServerState>, client_lock: Arc<RwLock<Client
             chan_user_guard.send(join_msg.clone()).await?;
         }
         drop(chan_users_guard);
+
+        let msgs = &channel_guard.get_join_msgs(&state, client_nick).await;
+        client.send_all(msgs).await?;
     };
 
     Ok(())
@@ -165,8 +166,9 @@ pub async fn handle_topic(state: Arc<ServerState>, client: Arc<RwLock<Client>>, 
     Ok(())
 }
 
-async fn handle_user_mode(state: Arc<ServerState>, mut client: RwLockWriteGuard<'_, Client>,
+async fn handle_user_mode(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>,
                           target: &str, modestring: Option<&String>) -> Result<(), Error> {
+    let mut client = client_lock.write().await;
     let client_nick = &client.get_nick().unwrap();
 
     if let Some(modestring) = modestring {
@@ -192,9 +194,10 @@ async fn handle_user_mode(state: Arc<ServerState>, mut client: RwLockWriteGuard<
     Ok(())
 }
 
-async fn handle_channel_mode(state: Arc<ServerState>, client: RwLockWriteGuard<'_, Client>,
+async fn handle_channel_mode(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>,
                           channel_lock: Arc<RwLock<Channel>>,
                           target: &str, modestring: Option<&String>) -> Result<(), Error> {
+    let client = client_lock.read().await;
     let client_nick = &client.get_nick().unwrap();
     let mut channel = channel_lock.write().await;
 
@@ -230,8 +233,8 @@ async fn handle_channel_mode(state: Arc<ServerState>, client: RwLockWriteGuard<'
     Ok(())
 }
 
-pub async fn handle_mode(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
-    let client = client.write().await;
+pub async fn handle_mode(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let client = client_lock.read().await;
     let client_nick = &client.get_nick().unwrap();
 
     let target = match msg.params.get(0) {
@@ -243,16 +246,37 @@ pub async fn handle_mode(state: Arc<ServerState>, client: Arc<RwLock<Client>>, m
     if target.starts_with('#') {
         if let Some(channel_ref) = state.channels.lock().await.get(&target.to_ascii_uppercase()) {
             let channel_lock = channel_ref.clone();
-            handle_channel_mode(state.clone(), client, channel_lock, target, modestring).await?;
+            handle_channel_mode(state.clone(), client_lock.clone(), channel_lock, target, modestring).await?;
         } else {
             command_error(&state, &client, ReplyCode::ErrNoSuchChannel{channel: target.clone()}).await?;
         }
     } else if target == client_nick {
-        handle_user_mode(state, client, target, modestring).await?;
+        handle_user_mode(state, client_lock.clone(), target, modestring).await?;
     } else if state.users.read().await.contains_key(target) {
         command_error(&state, &client, ReplyCode::ErrUsersDontMatch).await?;
     } else {
         command_error(&state, &client, ReplyCode::ErrNoSuchNick{ nick: target.to_owned() }).await?;
+    }
+    Ok(())
+}
+
+pub async fn handle_names(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let client = client.read().await;
+
+    let targets = match msg.params.get(0) {
+        Some(targets) => targets,
+        None => return command_error(&state, &client, ReplyCode::ErrNeedMoreParams{cmd: "NAMES".to_owned()}).await,
+    };
+
+    for target in targets.split(',') {
+        if let Some(channel_ref) = state.channels.lock().await.get(&target.to_ascii_uppercase()) {
+            let channel_lock = channel_ref.clone();
+            let channel = channel_lock.read().await;
+
+            client.send_all(&channel.get_names_msgs(&state, &client.get_nick().unwrap()).await).await?;
+        } else {
+            command_error(&state, &client, ReplyCode::RplEndOfNames { channel: target.to_owned() }).await?;
+        }
     }
     Ok(())
 }

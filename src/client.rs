@@ -349,9 +349,9 @@ impl Client {
         };
 
         let channel_guard = channel_arc.read().await;
-        let chan_join_msgs = channel_guard.get_join_msgs(&self.server_state, &self.get_nick().unwrap()).await;
         let mut chan_users_guard = channel_guard.users.write().await;
         chan_users_guard.insert(self.addr.to_string(), weak_self);
+        let chan_join_msgs = channel_guard.get_join_msgs(&self.server_state, &self.get_nick().unwrap()).await;
 
         let join_msg = Message {
             tags: Vec::new(),

@@ -8,7 +8,6 @@ use futures::FutureExt;
 use std::io::Error;
 use futures::future;
 use chrono::{DateTime, Local};
-use futures::executor::block_on;
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::mode::ChannelMode;
 
@@ -37,8 +36,27 @@ impl Channel {
         }
     }
 
+    pub async fn get_names_msgs(&self, state: &ServerState, client_nick: &str) -> Vec<Message> {
+        let mut msgs = Vec::new();
+        let users_guard = self.users.read().await;
+
+        let mut names = Vec::new();
+        for weak_user in users_guard.values() {
+            if let Some(user) = weak_user.upgrade() {
+                if let Some(nick) = user.read().await.get_nick() {
+                    names.push(nick);
+                }
+            }
+        }
+
+        let base_msg = make_reply_msg(state, client_nick, ReplyCode::RplNameReply{symbol: '=', channel: self.name.clone()});
+        msgs.extend(Message::split_trailing_args(base_msg, names, " "));
+        msgs.push(make_reply_msg(state, client_nick, ReplyCode::RplEndOfNames{channel: self.name.clone()}));
+        msgs
+    }
+
     /// Get a series of info messages to send after a client joins a channel
-    /// Call this before adding the user to the channel, or the user's nick will appear twice!
+    /// Call this right after adding the user to the channel
     pub async fn get_join_msgs(&self, state: &ServerState, client_nick: &str) -> Vec<Message> {
         let mut msgs = Vec::new();
         if let Some(ref topic) = self.topic {
@@ -48,20 +66,7 @@ impl Channel {
                                      ReplyCode::RplTopicWhoTime{channel: self.name.clone(), who: topic.set_by_host.clone(), time: topic.set_at}));
         }
 
-        let users_guard = self.users.read().await;
-        let mut names = users_guard.values().map(|user| {
-            user.upgrade().and_then(|user| {
-                block_on(user.read()).get_nick()
-            })
-        })
-            .filter(|name_opt| name_opt.is_some())
-            .map(|name_opt| name_opt.unwrap())
-            .collect::<Vec<_>>();
-        names.push(client_nick.to_owned());
-        let base_msg = make_reply_msg(state, client_nick, ReplyCode::RplNameReply{symbol: '=', channel: self.name.clone()});
-
-        msgs.extend(Message::split_trailing_args(base_msg, names, " "));
-        msgs.push(make_reply_msg(state, client_nick, ReplyCode::RplEndOfNames{channel: self.name.clone()}));
+        msgs.append(&mut self.get_names_msgs(state, client_nick).await);
         msgs
     }
 

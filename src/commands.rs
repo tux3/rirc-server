@@ -72,6 +72,7 @@ declare_commands!(
         {who, CommandNamespace::Normal},
         {whois, CommandNamespace::Normal},
         {mode, CommandNamespace::Normal},
+        {names, CommandNamespace::Normal},
     ]
 );
 
