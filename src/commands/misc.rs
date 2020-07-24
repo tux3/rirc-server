@@ -88,6 +88,20 @@ pub async fn handle_notice_or_privmsg(state: Arc<ServerState>, client: Arc<RwLoc
     if let Some(channel_ref) = state.channels.lock().await.get(&target.to_ascii_uppercase()) {
         let channel_lock = channel_ref.clone();
         let channel_guard = channel_lock.read().await;
+
+        if channel_guard.mode.no_external_msgs {
+            let users = channel_guard.users.read().await;
+            if !users.contains_key(&client.addr.to_string()) {
+                if !is_notice {
+                    command_error(&state, &client, ReplyCode::ErrCannotSendToChan {
+                        channel: target.clone(),
+                        reason: "Cannot send to channel (+n is set)".to_string()
+                    }).await?;
+                }
+                return Ok(())
+            }
+        }
+
         match (state.callbacks.on_client_channel_message)(&client, &channel_guard, &msg) {
             Ok(true) => (),
             Ok(false) => return Ok(()),
@@ -97,6 +111,7 @@ pub async fn handle_notice_or_privmsg(state: Arc<ServerState>, client: Arc<RwLoc
                 command_error(&state, &client, ReplyCode::ErrCannotSendToChan { channel: target.clone(), reason: e.to_string() }).await
             },
         }
+
         channel_guard.send(Message {
             tags: Vec::new(),
             source: Some(client.get_extended_prefix().expect("Message sent by user without a prefix!")),
