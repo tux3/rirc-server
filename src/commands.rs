@@ -60,7 +60,7 @@ declare_commands!(
         {ping, CommandNamespace::Any},
         {nick, CommandNamespace::Any},
         {user, CommandNamespace::Any},
-        {notice, CommandNamespace::Any},
+        {notice, CommandNamespace::Normal},
         {version, CommandNamespace::Normal},
         {lusers, CommandNamespace::Normal},
         {motd, CommandNamespace::Normal},

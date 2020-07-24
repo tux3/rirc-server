@@ -20,11 +20,6 @@ pub async fn handle_ping(state: Arc<ServerState>, client: Arc<RwLock<Client>>, m
     }).await
 }
 
-pub async fn handle_notice(_: Arc<ServerState>, _: Arc<RwLock<Client>>, _: Message) -> Result<(), Error> {
-    // TODO: Actually forward notices to other users and channels
-    Ok(())
-}
-
 pub async fn handle_version(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
     let client = client.read().await;
     if let Some(target) = msg.params.get(0) {
@@ -61,15 +56,33 @@ pub async fn handle_motd(state: Arc<ServerState>, client: Arc<RwLock<Client>>, m
     client.send_motd().await
 }
 
+
+pub async fn handle_notice(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    handle_notice_or_privmsg(state, client, msg, true).await
+}
+
 pub async fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    handle_notice_or_privmsg(state, client, msg, false).await
+}
+
+pub async fn handle_notice_or_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message, is_notice: bool) -> Result<(), Error> {
     let client = client.read().await;
+    let cmd_name = if is_notice { "NOTICE".to_owned() } else { "PRIVMSG".to_owned() };
     let target = match msg.params.get(0) {
         Some(nick) => nick,
-        None => return command_error(&state, &client, ReplyCode::ErrNoRecipient{cmd: "PRIVMSG".to_owned()}).await,
+        None => return if is_notice {
+            Ok(())
+        } else {
+            command_error(&state, &client, ReplyCode::ErrNoRecipient{cmd: cmd_name.clone()}).await
+        },
     };
     let msg_text = match msg.params.get(1) {
         Some(msg_text) => msg_text,
-        None => return command_error(&state, &client, ReplyCode::ErrNoTextToSend).await,
+        None => return if is_notice {
+            Ok(())
+        } else {
+            command_error(&state, &client, ReplyCode::ErrNoTextToSend).await
+        },
     };
 
     if let Some(channel_ref) = state.channels.lock().await.get(&target.to_ascii_uppercase()) {
@@ -78,39 +91,55 @@ pub async fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>
         match (state.callbacks.on_client_channel_message)(&client, &channel_guard, &msg) {
             Ok(true) => (),
             Ok(false) => return Ok(()),
-            Err(e) => return command_error(&state, &client, ReplyCode::ErrCannotSendToChan{channel: target.clone(), reason: e.to_string()}).await,
+            Err(e) => return if is_notice {
+                Ok(())
+            } else {
+                command_error(&state, &client, ReplyCode::ErrCannotSendToChan { channel: target.clone(), reason: e.to_string() }).await
+            },
         }
         channel_guard.send(Message {
             tags: Vec::new(),
-            source: Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!")),
-            command: "PRIVMSG".to_owned(),
+            source: Some(client.get_extended_prefix().expect("Message sent by user without a prefix!")),
+            command: cmd_name.clone(),
             params: vec!(channel_guard.name.to_owned(), msg_text.to_owned()),
         }, Some(client.addr.to_string())).await
-    } else if target.to_ascii_uppercase() == client.get_nick().expect("PRIVMSG sent by user without a nick!").to_ascii_uppercase() {
+    } else if target.to_ascii_uppercase() == client.get_nick().expect("Message sent by user without a nick!").to_ascii_uppercase() {
         let nick = client.get_nick().unwrap();
-        let prefix = Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!"));
-        client.send(Message {
-            tags: Vec::new(),
-            source: prefix,
-            command: "PRIVMSG".to_owned(),
-            params: vec!(nick, msg_text.to_owned()),
-        }).await
+        let prefix = Some(client.get_extended_prefix().expect("Message sent by user without a prefix!"));
+        if is_notice {
+            Ok(())
+        } else {
+            client.send(Message {
+                tags: Vec::new(),
+                source: prefix,
+                command: cmd_name.clone(),
+                params: vec!(nick, msg_text.to_owned()),
+            }).await
+        }
     } else if let Some(target_user) = state.users.read().await.get(&target.to_ascii_uppercase()) {
         let target_user = match target_user.upgrade() {
             Some(target_user) => target_user,
-            None => return command_error(&state, &client, ReplyCode::ErrNoSuchNick{nick: target.clone()}).await,
+            None => return if is_notice {
+                Ok(())
+            } else {
+                command_error(&state, &client, ReplyCode::ErrNoSuchNick{nick: target.clone()}).await
+            },
         };
         let target_user = target_user.read().await;
         let nick = target_user.get_nick().unwrap();
-        let prefix = Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!"));
+        let prefix = Some(client.get_extended_prefix().expect("Message sent by user without a prefix!"));
         target_user.send(Message {
             tags: Vec::new(),
             source: prefix,
-            command: "PRIVMSG".to_owned(),
+            command: cmd_name.clone(),
             params: vec!(nick, msg_text.to_owned()),
         }).await
     } else {
-        command_error(&state, &client, ReplyCode::ErrNoSuchNick{nick: target.clone()}).await
+        if is_notice {
+            Ok(())
+        } else {
+            command_error(&state, &client, ReplyCode::ErrNoSuchNick { nick: target.clone() }).await
+        }
     }
 }
 
