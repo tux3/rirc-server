@@ -28,8 +28,8 @@ impl ServerState {
         assert!(settings.max_name_length < message::MAX_LENGTH - msg_breathing_room);
         assert!(settings.max_channel_length < message::MAX_LENGTH - msg_breathing_room);
         assert!(settings.max_topic_length < message::MAX_LENGTH - msg_breathing_room);
-        assert!(!settings.server_name.contains(" "));
-        assert!(!settings.network_name.contains(" "));
+        assert!(!settings.server_name.contains(' '));
+        assert!(!settings.network_name.contains(' '));
 
         Arc::new(ServerState{
             settings,
@@ -69,7 +69,7 @@ impl Server {
     }
 
     async fn handle_client(state: Arc<ServerState>, mut client_duplex: ClientDuplex) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let addr = client_duplex.client.addr.clone();
+        let addr = client_duplex.client.addr;
         println!("New client: {}", &addr);
         let client = Arc::new(RwLock::new(client_duplex.client));
         {

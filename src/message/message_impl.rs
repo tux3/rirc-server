@@ -65,7 +65,7 @@ impl Message {
         }
 
         if !next_trailing.is_empty() {
-            let mut next_msg = base_msg.clone();
+            let mut next_msg = base_msg;
             next_msg.params.push(next_trailing);
             msgs.push(next_msg);
         }
@@ -93,10 +93,10 @@ impl Message {
 
             for (i, param) in self.params.iter().enumerate() {
                 if i == self.params.len() - 1 &&
-                    (param.contains(" ") || param.contains(":") || param.is_empty()) {
+                    (param.contains(' ') || param.contains(':') || param.is_empty()) {
                     line = line + " :" + param;
                 } else {
-                    debug_assert!(!param.contains(" "));
+                    debug_assert!(!param.contains(' '));
                     line = line + " " + param;
                 }
             }
@@ -106,18 +106,18 @@ impl Message {
     }
 
     fn consume_tags(msg_line: &str) -> (Vec<MessageTag>, &str) {
-        assert!(msg_line.ends_with("\n"));
+        assert!(msg_line.ends_with('\n'));
         let new_end = msg_line.len() - if msg_line.ends_with("\r\n") { 2 } else { 1 };
         let msg_line = msg_line[..new_end].trim_start();
 
-        if msg_line.bytes().next() == Some('@' as u8) {
+        if msg_line.bytes().next() == Some(b'@') {
             let (tags_word, next_msg_line) = if let Some(next_space) = msg_line.find(' ') {
                 (&msg_line[1..next_space], &msg_line[next_space..])
             } else {
                 (&msg_line[1..], "")
             };
 
-            let tags = tags_word.split(";").map(|tag| {
+            let tags = tags_word.split(';').map(|tag| {
                 if let Some(equal) = tag.find('=') {
                     MessageTag{
                         name: tag[..equal].to_string(),
@@ -136,9 +136,9 @@ impl Message {
         }
     }
 
-    fn consume_source<'a>(msg_line: &'a str) -> (Option<String>, &'a str) {
+    fn consume_source(msg_line: &str) -> (Option<String>, &str) {
         let msg_line = msg_line.trim_start();
-        if msg_line.bytes().next() == Some(':' as u8) {
+        if msg_line.bytes().next() == Some(b':') {
             match msg_line.find(' ') {
                 Some(next_space) => (Some(msg_line[1..next_space].to_string()), &msg_line[next_space..]),
                 None => (Some(msg_line[1..].to_string()), ""),
@@ -157,7 +157,7 @@ impl Message {
                 Some(word) => word,
                 None => return (command, params),
             };
-            if param.bytes().next() == Some(':' as u8) {
+            if param.bytes().next() == Some(b':') {
                 params.push(words.fold(param[1..].to_string(), |s, w| s+" "+w));
             } else if !param.is_empty() {
                 params.push(param.to_string());

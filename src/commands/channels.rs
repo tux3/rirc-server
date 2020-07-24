@@ -92,7 +92,7 @@ pub async fn handle_part(state: Arc<ServerState>, client_lock: Arc<RwLock<Client
 
     let mut futs = Vec::new();
     for chan_name in chanlist {
-        if !chan_name.starts_with("#") {
+        if !chan_name.starts_with('#') {
             command_error(&state, &client, ReplyCode::ErrNoSuchChannel{channel: chan_name.to_string()}).await?;
         } else {
             futs.push(client.part(chan_name));
@@ -151,7 +151,7 @@ pub async fn handle_topic(state: Arc<ServerState>, client: Arc<RwLock<Client>>, 
             if let Some(ref topic) = channel_guard.topic {
                 client.send_all(&[
                     make_reply_msg(&state, &client_nick, ReplyCode::RplTopic { channel: channel.clone(), text: topic.text.clone() }),
-                    make_reply_msg(&state, &client_nick, ReplyCode::RplTopicWhoTime { channel, who: topic.set_by_host.clone(), time: topic.set_at.clone() }),
+                    make_reply_msg(&state, &client_nick, ReplyCode::RplTopicWhoTime { channel, who: topic.set_by_host.clone(), time: topic.set_at }),
                 ]).await?;
             } else {
                 client.send(make_reply_msg(&state, &client_nick, ReplyCode::RplNoTopic { channel })).await?;

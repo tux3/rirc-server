@@ -1,9 +1,4 @@
-#[macro_use]
-extern crate lazy_static;
-extern crate tokio;
-extern crate futures;
-extern crate regex;
-extern crate chrono;
+#![allow(clippy::useless_format)]
 
 mod client;
 mod server;

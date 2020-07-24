@@ -22,11 +22,7 @@ fn who_reply_for_user(state: &ServerState, asker_nick: &str, chan_name: String, 
 
 fn user_matches_mask(user: &Client, mask: &str) -> bool {
     // TODO: Handle wildcards
-    if user.get_nick().unwrap() == mask {
-        true
-    } else {
-        false
-    }
+    user.get_nick().unwrap() == mask
 }
 
 pub async fn handle_who(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
@@ -36,7 +32,7 @@ pub async fn handle_who(state: Arc<ServerState>, client: Arc<RwLock<Client>>, ms
         None => return command_error(&state, &client, ReplyCode::ErrNeedMoreParams{cmd: "WHO".to_owned()}).await,
     };
     let op_param = msg.params.get(1);
-    if let Some(_) = op_param {
+    if op_param.is_some() {
         // TODO: If and when we add operators, the /who op param should be implemented
         return command_error(&state, &client, ReplyCode::RplEndOfWho{mask: mask.to_owned()}).await;
     }

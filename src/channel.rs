@@ -39,7 +39,7 @@ impl Channel {
             msgs.push(make_reply_msg(state, client_nick,
                                      ReplyCode::RplTopic{channel: self.name.clone(), text: topic.text.clone()}));
             msgs.push(make_reply_msg(state, client_nick,
-                                     ReplyCode::RplTopicWhoTime{channel: self.name.clone(), who: topic.set_by_host.clone(), time: topic.set_at.clone()}));
+                                     ReplyCode::RplTopicWhoTime{channel: self.name.clone(), who: topic.set_by_host.clone(), time: topic.set_at}));
         }
 
         let users_guard = self.users.read().await;

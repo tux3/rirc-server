@@ -312,7 +312,7 @@ impl Client {
 
     /// Joins a channel, assuming it doesn't violate any rules
     pub async fn join(&self, chan_name: &str) -> Result<(), Error> {
-        if !chan_name.starts_with("#") {
+        if !chan_name.starts_with('#') {
             return Err(Error::new(ErrorKind::InvalidInput, "Channels must start with a #"));
         }
         if self.channels.read().await.len() >= self.server_state.settings.chan_limit {

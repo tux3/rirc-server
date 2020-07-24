@@ -6,6 +6,7 @@ use regex::Regex;
 use std::io::Error;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use lazy_static::lazy_static;
 
 lazy_static! {
     static ref VALID_NICKNAME_REGEX: Regex = Regex::new(r"^[[:alpha:]\[\\\]\^_`\{\|\}][[:alnum:]\[\\\]\^_`\{\|\}\-]*$").unwrap();
@@ -21,7 +22,7 @@ fn is_valid_nick(max_len: usize, nick: &str) -> bool {
 fn make_valid_username(max_len: usize, username: &str) -> Option<String> {
     let mut username = username.to_owned();
     username.truncate(max_len-1);
-    if let Some(mat) = BAD_USERNAME_CHARS_REGEX.find(&username).and_then(|mat| Some(mat.start())) {
+    if let Some(mat) = BAD_USERNAME_CHARS_REGEX.find(&username).map(|mat| mat.start()) {
         username.truncate(mat);
     };
     if !username.is_empty() {
@@ -38,7 +39,7 @@ pub async fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client
         None => return command_error(&state, &client, ReplyCode::ErrNoNicknameGiven).await,
     };
     if !is_valid_nick(state.settings.max_name_length, new_nick) {
-        let cur_nick = client.get_nick().unwrap_or("*".to_owned());
+        let cur_nick = client.get_nick().unwrap_or_else(|| "*".to_owned());
         return client.send(make_reply_msg(&state, &cur_nick, ReplyCode::ErrErroneusNickname{nick: new_nick.clone()})).await;
     }
 
@@ -79,7 +80,7 @@ pub async fn handle_user(state: Arc<ServerState>, client: Arc<RwLock<Client>>, m
         Some(username) => match make_valid_username(state.settings.max_name_length, username) {
             Some(username) => username,
             None => {
-                let nick = client.get_nick().unwrap_or("*".to_owned());
+                let nick = client.get_nick().unwrap_or_else(|| "*".to_owned());
                 client.send(Message {
                     tags: Vec::new(),
                     source: Some(state.settings.server_name.clone()),

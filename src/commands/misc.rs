@@ -33,7 +33,7 @@ pub async fn handle_version(state: Arc<ServerState>, client: Arc<RwLock<Client>>
         }
     };
 
-    let nick = client.get_nick().unwrap_or("*".to_owned());
+    let nick = client.get_nick().unwrap_or_else(|| "*".to_owned());
     client.send(make_reply_msg(&state, &nick, ReplyCode::RplVersion {comments: String::new()})).await?;
     client.send_issupport().await?;
     Ok(())
@@ -87,7 +87,7 @@ pub async fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>
             params: vec!(channel_guard.name.to_owned(), msg_text.to_owned()),
         }, Some(client.addr.to_string())).await
     } else if target.to_ascii_uppercase() == client.get_nick().expect("PRIVMSG sent by user without a nick!").to_ascii_uppercase() {
-        let nick = client.get_nick().unwrap().to_owned();
+        let nick = client.get_nick().unwrap();
         let prefix = Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!"));
         client.send(Message {
             tags: Vec::new(),
@@ -101,7 +101,7 @@ pub async fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>
             None => return command_error(&state, &client, ReplyCode::ErrNoSuchNick{nick: target.clone()}).await,
         };
         let target_user = target_user.read().await;
-        let nick = target_user.get_nick().unwrap().to_owned();
+        let nick = target_user.get_nick().unwrap();
         let prefix = Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!"));
         target_user.send(Message {
             tags: Vec::new(),
@@ -110,13 +110,13 @@ pub async fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>
             params: vec!(nick, msg_text.to_owned()),
         }).await
     } else {
-        return command_error(&state, &client, ReplyCode::ErrNoSuchNick{nick: target.clone()}).await;
+        command_error(&state, &client, ReplyCode::ErrNoSuchNick{nick: target.clone()}).await
     }
 }
 
 pub async fn handle_quit(_: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
     let client = client.read().await;
-    let reason = msg.params.get(0).map(|str| str.to_owned()).unwrap_or("Quit".to_owned());
+    let reason = msg.params.get(0).map(|str| str.to_owned()).unwrap_or_else(|| "Quit".to_owned());
     if let ClientStatus::Unregistered{..} = client.status {
         return Err(Error::new(ErrorKind::Other, reason.clone()));
     }

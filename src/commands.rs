@@ -1,13 +1,24 @@
 use crate::client::{Client, ClientStatus};
 use crate::server::ServerState;
 use crate::message::{Message, ReplyCode, make_reply_msg};
-use crate::commands::*;
 use futures::{Future};
 use std::io::{Error};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::pin::Pin;
 use tokio::sync::RwLock;
+use lazy_static::lazy_static;
+
+macro_rules! pub_use_submodules {
+    ( $( $name:ident ),* ) => {
+        $(
+            mod $name;
+            pub use self::$name::*;
+        )*
+    };
+}
+
+pub_use_submodules!(misc, identity, channels, userqueries);
 
 enum CommandNamespace {
     /// Clients in any state can execute this command

@@ -92,7 +92,7 @@ pub fn make_reply_msg(state: &ServerState, client_nick: &str, reply_type: ReplyC
 
     params.insert(0, client_nick.to_owned());
     if let Some(description) = description {
-        params.push(description.to_owned());
+        params.push(description);
     }
     Message {
         tags: Vec::new(),

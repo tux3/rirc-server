@@ -34,7 +34,7 @@ impl<T: AsyncRead + AsyncBufRead + Unpin> Stream for MessageStream<T> {
             Ok(n) => n,
             Err(e) => return Poll::Ready(Some(Err(e))),
         };
-        if n == 0 && this.msg_line.len() == 0 {
+        if n == 0 && this.msg_line.is_empty() {
             return Poll::Ready(None)
         }
         let msg = Message::new(&this.msg_line);
