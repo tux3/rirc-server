@@ -12,10 +12,11 @@ mod message;
 mod commands;
 mod settings;
 mod callbacks;
+mod errors;
 
-pub use server::Server;
-pub use settings::ServerSettings;
-pub use callbacks::ServerCallbacks;
-pub use client::Client;
-pub use channel::Channel;
-pub use message::Message;
+pub use crate::server::Server;
+pub use crate::settings::ServerSettings;
+pub use crate::callbacks::ServerCallbacks;
+pub use crate::client::Client;
+pub use crate::channel::Channel;
+pub use crate::message::Message;

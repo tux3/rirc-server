@@ -1,46 +1,52 @@
-use tokio::io::{AsyncWrite};
 use std::io::{Error};
-use futures::{Sink, Poll, Async, AsyncSink, StartSend};
-use message::Message;
+use futures::{Sink};
+use crate::message::Message;
+use futures::task::{Context, Poll};
+use tokio::macros::support::Pin;
+use tokio::io::AsyncWrite;
 
 // A Sink for sending IRC messages
-pub struct MessageSink<T: AsyncWrite> {
-    io: T,
+pub struct MessageSink<T: AsyncWrite + Unpin> {
+    io: Pin<Box<T>>,
     send_buffer: Vec<u8>,
 }
 
-impl<T: AsyncWrite> MessageSink<T> {
+impl<T: AsyncWrite + Unpin> MessageSink<T> {
     pub fn new(io: T) -> MessageSink<T> {
         MessageSink {
-            io,
+            io: Box::pin(io),
             send_buffer: Vec::new(),
         }
     }
 }
 
-impl<T: AsyncWrite> Sink for MessageSink<T> {
-    type SinkItem = Message;
-    type SinkError = Error;
+impl<T: AsyncWrite + Unpin> Sink<Message> for MessageSink<T> {
+    type Error = Error;
 
-    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.poll_flush(cx)
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
         self.send_buffer.extend_from_slice(item.to_line().as_bytes());
-
-        self.poll_complete().map(|_| AsyncSink::Ready)
+        Ok(())
     }
 
-    fn poll_complete(&mut self) -> Poll<(), Error> {
-        if let Async::Ready(n) = self.io.poll_write(&self.send_buffer)? {
-            self.send_buffer.drain(0..n);
-        };
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let this = Pin::into_inner(self);
 
-        Ok(if self.send_buffer.is_empty() {
-            Async::Ready(())
-        } else {
-            Async::NotReady
-        })
+        while !this.send_buffer.is_empty() {
+            match this.io.as_mut().poll_write(cx, &this.send_buffer) {
+                Poll::Ready(Ok(n)) => { this.send_buffer.drain(0..n); },
+                Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+
+        Poll::Ready(Ok(()))
     }
 
-    fn close(&mut self) -> Poll<(), Error> {
-        self.poll_complete()
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.poll_flush(cx)
     }
 }

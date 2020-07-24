@@ -105,10 +105,10 @@ impl Message {
         line+"\r\n"
     }
 
-    fn consume_tags<'a>(msg_line: &'a str) -> (Vec<MessageTag>, &'a str) {
+    fn consume_tags(msg_line: &str) -> (Vec<MessageTag>, &str) {
         assert!(msg_line.ends_with("\n"));
         let new_end = msg_line.len() - if msg_line.ends_with("\r\n") { 2 } else { 1 };
-        let msg_line = msg_line[..new_end].trim_left();
+        let msg_line = msg_line[..new_end].trim_start();
 
         if msg_line.bytes().next() == Some('@' as u8) {
             let (tags_word, next_msg_line) = if let Some(next_space) = msg_line.find(' ') {
@@ -137,7 +137,7 @@ impl Message {
     }
 
     fn consume_source<'a>(msg_line: &'a str) -> (Option<String>, &'a str) {
-        let msg_line = msg_line.trim_left();
+        let msg_line = msg_line.trim_start();
         if msg_line.bytes().next() == Some(':' as u8) {
             match msg_line.find(' ') {
                 Some(next_space) => (Some(msg_line[1..next_space].to_string()), &msg_line[next_space..]),
@@ -149,7 +149,7 @@ impl Message {
     }
 
     fn parse_command_params(msg_line: &str) -> (String, Vec<String>) {
-        let words = &mut msg_line.trim_left().split(' ');
+        let words = &mut msg_line.trim_start().split(' ');
         let command = words.next().unwrap_or("").to_string();
         let mut params = Vec::new();
         loop {

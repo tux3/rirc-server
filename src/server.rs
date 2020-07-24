@@ -1,16 +1,17 @@
-use settings::ServerSettings;
-use callbacks::ServerCallbacks;
-use client::{ClientDuplex, Client, ClientStatus};
-use channel::{Channel};
-use tokio::{self};
-use tokio::net::{TcpListener};
-use futures::{Future, Stream, future};
+use crate::settings::ServerSettings;
+use crate::callbacks::ServerCallbacks;
+use crate::client::{ClientDuplex, Client, ClientStatus};
+use crate::channel::{Channel};
+use crate::message::{self, Message, make_reply_msg, ReplyCode};
+use crate::commands::{COMMANDS, is_command_available};
+
+use futures::StreamExt;
 use chrono::{DateTime, Local};
-use std::io::{Error};
-use std::sync::{Arc, Weak, Mutex, RwLock};
-use message::{self, Message, make_reply_msg, ReplyCode};
-use commands::{COMMANDS, is_command_available};
+use std::io::Error;
+use std::sync::{Arc, Weak};
 use std::collections::HashMap;
+use tokio::net::TcpListener;
+use tokio::sync::{RwLock, Mutex};
 
 pub struct ServerState {
     pub settings: ServerSettings,
@@ -52,68 +53,63 @@ impl Server {
         }
     }
 
-    pub fn start(&mut self) {
+    pub async fn start(&mut self) -> Result<(), Error> {
         let state_ref = Arc::downgrade(&self.state);
-        let listener = TcpListener::bind(&self.state.settings.listen_addr).unwrap();
 
-        let server_fut = listener.incoming().for_each(move | socket| {
+        let mut listener = TcpListener::bind(&self.state.settings.listen_addr).await?;
+        let mut incoming = listener.incoming();
+
+        while let Some(socket) = incoming.next().await {
+            let socket = socket?;
             let state = state_ref.upgrade().expect("Server state dropped while still accepting clients!");
-            Server::handle_client(state.clone(), ClientDuplex::new(state, socket));
+            tokio::spawn(Server::handle_client(state.clone(), ClientDuplex::new(state, socket)));
+        }
 
-            Ok(())
-        }).map_err(|_| ());
-
-        tokio::run(server_fut);
+        Ok(())
     }
 
-    fn handle_client(state: Arc<ServerState>, client_duplex: ClientDuplex) {
+    async fn handle_client(state: Arc<ServerState>, mut client_duplex: ClientDuplex) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let addr = client_duplex.client.addr.clone();
         println!("New client: {}", &addr);
         let client = Arc::new(RwLock::new(client_duplex.client));
         {
-            let old_client = state.clients.lock().expect("State client lock")
-                                                                .insert(addr.to_string(), Arc::downgrade(&client));
+            let old_client = state.clients.lock().await
+                .insert(addr.to_string(), Arc::downgrade(&client));
             debug_assert!(old_client.is_none());
         }
         match (state.callbacks.on_client_connect)(&addr) {
             Ok(true) => (),
-            _ => return,
+            Ok(false) => return Ok(()),
+            Err(err) => return Err(err),
         };
 
-        let fut = client_duplex.stream
-        .fold(client, move |client, msg| {
-            //let state = state_ref.upgrade().expect("Server state dropped while still accepting clients!");
-            Server::process_message(state.clone(), client, msg)
-        }).then(move |_| {
-            println!("Client {} disconnected", &addr);
-            Ok(())
-        });
+        while let Some(msg) = client_duplex.stream.next().await {
+            let msg = msg?;
+            Server::process_message(state.clone(), client.clone(), msg).await?;
+        }
 
-        tokio::spawn(fut);
+        println!("Client {} disconnected", &addr);
+        Ok(())
     }
 
-    fn process_message(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> impl Future<Item=Arc<RwLock<Client>>, Error=Error> {
-        let fut = if let Some(command) = COMMANDS.get(&msg.command.to_ascii_uppercase() as &str) {
-            if is_command_available(&command, &client_lock.read().unwrap()) {
-                (command.handler)(state.clone(), client_lock.clone(), msg)
-            } else {
-                Box::new(future::ok(()))
+    async fn process_message(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+        if let Some(command) = COMMANDS.get(&msg.command.to_ascii_uppercase() as &str) {
+            if is_command_available(&command, &*client_lock.read().await) {
+                (command.handler)(state.clone(), client_lock.clone(), msg).await?;
             }
         } else {
             // We need two blocks to end the client nick's borrow before the send. Thanks, borrowck.
-            let client = client_lock.read().unwrap();
+            let client = client_lock.read().await;
             let maybe_nick = match client.status {
                 ClientStatus::Normal(ref client_status) => Some(client_status.nick.clone()),
                 _ => None,
             };
 
             if let Some(nick) = maybe_nick {
-                client.send(make_reply_msg(&state, &nick, ReplyCode::ErrUnknownCommand{cmd: msg.command.clone()}))
-            } else {
-                Box::new(future::ok(()))
+                client.send(make_reply_msg(&state, &nick, ReplyCode::ErrUnknownCommand{cmd: msg.command.clone()})).await?;
             }
         };
 
-        fut.map(|()| client_lock)
+        Ok(())
     }
 }

@@ -1,7 +1,8 @@
-use message::Message;
-use server::ServerState;
+use crate::message::Message;
+use crate::server::ServerState;
 use chrono::{DateTime, Local};
 
+#[allow(dead_code)] // Some reply codes may not be used yet, but that's ok: they're from the spec
 pub enum ReplyCode {
     RplWelcome,
     RplYourHost,

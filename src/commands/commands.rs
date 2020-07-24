@@ -1,11 +1,13 @@
-use client::{Client, ClientStatus};
-use server::ServerState;
-use message::Message;
+use crate::client::{Client, ClientStatus};
+use crate::server::ServerState;
+use crate::message::{Message, ReplyCode, make_reply_msg};
+use crate::commands::*;
 use futures::{Future};
 use std::io::{Error};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use commands::*;
+use std::sync::Arc;
+use std::pin::Pin;
+use tokio::sync::RwLock;
 
 enum CommandNamespace {
     /// Clients in any state can execute this command
@@ -14,7 +16,8 @@ enum CommandNamespace {
     Normal,
 }
 
-pub type CommandHandler = fn(Arc<ServerState>, Arc<RwLock<Client>>, Message) -> Box<Future<Item=(), Error=Error>  + Send>;
+type CommandHandlerFuture = Pin<Box<dyn Future<Output=Result<(), Error>> + Send>>;
+pub type CommandHandler = fn(Arc<ServerState>, Arc<RwLock<Client>>, Message) -> CommandHandlerFuture;
 
 pub struct Command {
     pub name: &'static str,
@@ -22,21 +25,42 @@ pub struct Command {
     pub handler: CommandHandler,
 }
 
-pub const COMMANDS_LIST: &[Command] = &[
-    Command{name: "PING", permissions: CommandNamespace::Any, handler: handle_ping},
-    Command{name: "NICK", permissions: CommandNamespace::Any, handler: handle_nick},
-    Command{name: "USER", permissions: CommandNamespace::Any, handler: handle_user},
-    Command{name: "NOTICE", permissions: CommandNamespace::Any, handler: handle_notice},
-    Command{name: "VERSION", permissions: CommandNamespace::Normal, handler: handle_version},
-    Command{name: "LUSERS", permissions: CommandNamespace::Normal, handler: handle_lusers},
-    Command{name: "MOTD", permissions: CommandNamespace::Normal, handler: handle_motd},
-    Command{name: "PRIVMSG", permissions: CommandNamespace::Normal, handler: handle_privmsg},
-    Command{name: "JOIN", permissions: CommandNamespace::Normal, handler: handle_join},
-    Command{name: "PART", permissions: CommandNamespace::Normal, handler: handle_part},
-    Command{name: "QUIT", permissions: CommandNamespace::Normal, handler: handle_quit},
-    Command{name: "TOPIC", permissions: CommandNamespace::Normal, handler: handle_topic},
-    Command{name: "WHO", permissions: CommandNamespace::Normal, handler: handle_who},
-];
+macro_rules! declare_commands {
+    ( pub const $cmd_list:ident = [ $( { $cmd:pat, $namespace:expr }, )* ] ) => {
+
+        pub const $cmd_list : &[Command] = &[
+            $( Command {
+                name: paste::expr! { stringify!( [<$cmd:upper>] ) },
+                permissions: $namespace,
+                handler: paste::expr! { [<handle_ $cmd _thunk>] }
+            } ),*
+        ];
+
+        $( paste::item! {
+            fn [<handle_ $cmd _thunk>](state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> CommandHandlerFuture {
+                Box::pin( [<handle_ $cmd>] (state, client, msg))
+            }
+        } )*
+    };
+}
+
+declare_commands!(
+    pub const COMMANDS_LIST = [
+        {ping, CommandNamespace::Any},
+        {nick, CommandNamespace::Any},
+        {user, CommandNamespace::Any},
+        {notice, CommandNamespace::Any},
+        {version, CommandNamespace::Normal},
+        {lusers, CommandNamespace::Normal},
+        {motd, CommandNamespace::Normal},
+        {privmsg, CommandNamespace::Normal},
+        {join, CommandNamespace::Normal},
+        {part, CommandNamespace::Normal},
+        {quit, CommandNamespace::Normal},
+        {topic, CommandNamespace::Normal},
+        {who, CommandNamespace::Normal},
+    ]
+);
 
 lazy_static! {
     pub static ref COMMANDS: HashMap<&'static str, &'static Command> = {
@@ -48,14 +72,13 @@ lazy_static! {
     };
 }
 
-/// Sending an error reply if the client has a nick
-macro_rules! command_error {
-    ( $state:expr, $client:expr, $err:expr ) => {
-        match $client.get_nick() {
-            Some(nick) => Box::new($client.send(make_reply_msg(&$state, &nick, $err))),
-            None => Box::new(future::ok(())) as Box<Future<Item=(), Error=Error>  + Send>,
-        }
-    };
+/// Sending an error reply (only if the client has a nick)
+pub async fn command_error(state: &ServerState, client: &Client, err: ReplyCode) -> Result<(), Error> {
+    if let Some(nick) = client.get_nick() {
+        client.send(make_reply_msg(state, &nick, err)).await?
+    }
+
+    Ok(())
 }
 
 pub fn is_command_available(cmd: &Command, client: &Client) -> bool {

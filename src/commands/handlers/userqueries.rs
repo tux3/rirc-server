@@ -1,9 +1,10 @@
-use client::{Client};
-use server::ServerState;
-use message::{Message, make_reply_msg, ReplyCode};
-use futures::{Future, future};
+use crate::client::{Client};
+use crate::server::ServerState;
+use crate::message::{Message, make_reply_msg, ReplyCode};
+use crate::commands::command_error;
 use std::io::{Error};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use std::collections::{HashSet};
 
 fn who_reply_for_user(state: &ServerState, asker_nick: &str, chan_name: String, user: &Client) -> Message {
@@ -28,42 +29,42 @@ fn user_matches_mask(user: &Client, mask: &str) -> bool {
     }
 }
 
-pub fn handle_who(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    let client = client.read().expect("Client read lock broken");
+pub async fn handle_who(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let client = client.read().await;
     let mask = match msg.params.get(0) {
         Some(mask) => mask,
-        None => return command_error!(state, client, ReplyCode::ErrNeedMoreParams{cmd: "WHO".to_owned()}),
+        None => return command_error(&state, &client, ReplyCode::ErrNeedMoreParams{cmd: "WHO".to_owned()}).await,
     };
     let op_param = msg.params.get(1);
     if let Some(_) = op_param {
         // TODO: If and when we add operators, the /who op param should be implemented
-        return command_error!(state, client, ReplyCode::RplEndOfWho{mask: mask.to_owned()});
+        return command_error(&state, &client, ReplyCode::RplEndOfWho{mask: mask.to_owned()}).await;
     }
 
     let mut messages = Vec::new();
-    if let Some(channel_ref) = state.channels.lock().expect("State channels lock broken").get(&mask.to_ascii_uppercase()) {
+    if let Some(channel_ref) = state.channels.lock().await.get(&mask.to_ascii_uppercase()) {
         let channel_lock = channel_ref.clone();
-        let mut channel_guard = channel_lock.read().expect("Channel lock broken");
-        let channel_users_guard = channel_guard.users.read().expect("Channel users lock broken");
+        let channel_guard = channel_lock.read().await;
+        let channel_users_guard = channel_guard.users.read().await;
 
         for weak_user in channel_users_guard.values() {
             let user_lock = match weak_user.upgrade() {
                 Some(user) => user,
                 None => continue,
             };
-            let user_guard = user_lock.read().expect("User read lock");
+            let user_guard = user_lock.read().await;
             messages.push(who_reply_for_user(&state, &client.get_nick().unwrap(), channel_guard.name.clone(), &user_guard))
         }
     } else {
         let mut users_matched = HashSet::new();
-        for channel_weak in client.channels.read().expect("Client users lock").values() {
+        for channel_weak in client.channels.read().await.values() {
             let channel_lock = match channel_weak.upgrade() {
                 Some(channel) => channel,
                 None => continue,
             };
-            let channel_guard = channel_lock.read().expect("Channel read lock");
+            let channel_guard = channel_lock.read().await;
 
-            let channel_users = channel_guard.users.read().expect("Channel users read lock");
+            let channel_users = channel_guard.users.read().await;
             for (user_addr, weak_user) in channel_users.iter() {
                 if !users_matched.insert(user_addr.to_string()) {
                     continue
@@ -73,7 +74,7 @@ pub fn handle_who(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Mes
                     Some(user) => user,
                     None => continue,
                 };
-                let user_guard = user_lock.read().expect("User read lock");
+                let user_guard = user_lock.read().await;
                 if !user_matches_mask(&user_guard, &mask) {
                     continue
                 }
@@ -83,5 +84,5 @@ pub fn handle_who(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Mes
     }
 
     messages.push(make_reply_msg(&state, &client.get_nick().unwrap(), ReplyCode::RplEndOfWho{mask: mask.to_owned()}));
-    client.send_all(&messages)
+    client.send_all(&messages).await
 }

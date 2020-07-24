@@ -1,10 +1,11 @@
-use client::{Client, ClientStatus};
-use server::ServerState;
-use message::{Message, make_reply_msg, ReplyCode};
-use futures::{Future, future};
+use crate::client::{Client, ClientStatus};
+use crate::server::ServerState;
+use crate::message::{Message, make_reply_msg, ReplyCode};
+use crate::commands::command_error;
 use regex::Regex;
-use std::io::{Error};
-use std::sync::{Arc, RwLock};
+use std::io::Error;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 lazy_static! {
     static ref VALID_NICKNAME_REGEX: Regex = Regex::new(r"^[[:alpha:]\[\\\]\^_`\{\|\}][[:alnum:]\[\\\]\^_`\{\|\}\-]*$").unwrap();
@@ -30,19 +31,19 @@ fn make_valid_username(max_len: usize, username: &str) -> Option<String> {
     }
 }
 
-pub fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    let mut client = client_lock.write().expect("Client write lock broken");
+pub async fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let mut client = client_lock.write().await;
     let new_nick = match msg.params.get(0) {
         Some(nick) => nick,
-        None => return command_error!(state, client, ReplyCode::ErrNoNicknameGiven),
+        None => return command_error(&state, &client, ReplyCode::ErrNoNicknameGiven).await,
     };
     if !is_valid_nick(state.settings.max_name_length, new_nick) {
         let cur_nick = client.get_nick().unwrap_or("*".to_owned());
-        return client.send(make_reply_msg(&state, &cur_nick, ReplyCode::ErrErroneusNickname{nick: new_nick.clone()}));
+        return client.send(make_reply_msg(&state, &cur_nick, ReplyCode::ErrErroneusNickname{nick: new_nick.clone()})).await;
     }
 
-    if state.users.lock().expect("State users lock broken").contains_key(&new_nick.to_ascii_uppercase()) {
-        return command_error!(state, client, ReplyCode::ErrNicknameInUse{nick: new_nick.clone()});
+    if state.users.lock().await.contains_key(&new_nick.to_ascii_uppercase()) {
+        return command_error(&state, &client, ReplyCode::ErrNicknameInUse{nick: new_nick.clone()}).await;
     }
 
     let old_extended_prefix = client.get_extended_prefix();
@@ -53,13 +54,13 @@ pub fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, ms
         ClientStatus::Normal(ref mut state) => state.nick = new_nick.clone(),
     };
 
-    return if let ClientStatus::Unregistered{..} = client.status {
-        client.try_finish_registration()
+    if let ClientStatus::Unregistered{..} = client.status {
+        client.try_finish_registration().await
     } else {
         drop(client);
-        let mut client = client_lock.read().expect("Client read lock broken");
+        let client = client_lock.read().await;
 
-        let mut users_map = state.users.lock().expect("Failed to lock users vector");
+        let mut users_map = state.users.lock().await;
         let old_user = users_map.remove(&old_nick.unwrap().to_ascii_uppercase());
         users_map.insert(new_nick.to_ascii_uppercase(), old_user.unwrap());
 
@@ -68,12 +69,12 @@ pub fn handle_nick(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, ms
             source: old_extended_prefix,
             command: "NICK".to_owned(),
             params: vec!(new_nick.clone()),
-        }, true)
+        }, true).await
     }
 }
 
-pub fn handle_user(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    let client: &mut Client = &mut client.write().expect("Client write lock broken");
+pub async fn handle_user(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let mut client = client.write().await;
     let username = match msg.params.get(0) {
         Some(username) => match make_valid_username(state.settings.max_name_length, username) {
             Some(username) => username,
@@ -84,15 +85,15 @@ pub fn handle_user(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Me
                     source: Some(state.settings.server_name.clone()),
                     command: "NOTICE".to_owned(),
                     params: vec!(nick, "*** Your username is invalid. Please make sure that your username contains only alphanumeric characters.".to_owned()),
-                });
-                return client.close_with_error( "Invalid username");
+                }).await?;
+                return client.close_with_error( "Invalid username").await;
             },
         },
-        None => return command_error!(state, client, ReplyCode::ErrNeedMoreParams{cmd: msg.command}),
+        None => return command_error(&state, &client, ReplyCode::ErrNeedMoreParams{cmd: msg.command}).await,
     };
     let realname = match msg.params.get(3) {
         Some(realname) => realname,
-        None => return command_error!(state, client, ReplyCode::ErrNeedMoreParams{cmd: msg.command}),
+        None => return command_error(&state, &client, ReplyCode::ErrNeedMoreParams{cmd: msg.command}).await,
     };
 
     match client.status {
@@ -100,16 +101,16 @@ pub fn handle_user(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Me
             client_state.username = Some(username.clone());
             client_state.realname = Some(realname.clone());
         },
-        _ => return command_error!(state, client, ReplyCode::ErrAlreadyRegistered),
+        _ => return command_error(&state, &client, ReplyCode::ErrAlreadyRegistered).await,
     };
 
-    client.try_finish_registration()
+    client.try_finish_registration().await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commands::COMMANDS_LIST;
+    use crate::commands::COMMANDS_LIST;
     use std::collections::HashSet;
 
     fn is_valid_username(max_len: usize, username: &str) -> bool {

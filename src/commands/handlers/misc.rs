@@ -1,12 +1,13 @@
-use client::{Client, ClientStatus};
-use server::ServerState;
-use message::{Message, make_reply_msg, ReplyCode};
-use futures::{Future, future};
+use crate::client::{Client, ClientStatus};
+use crate::server::ServerState;
+use crate::message::{Message, make_reply_msg, ReplyCode};
+use crate::commands::command_error;
 use std::io::{Error, ErrorKind};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-pub fn handle_ping(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    let client = client.read().expect("Client read lock broken");
+pub async fn handle_ping(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error>{
+    let client = client.read().await;
 
     let mut reply_params = msg.params.clone();
     reply_params.insert(0, state.settings.server_name.clone());
@@ -16,105 +17,108 @@ pub fn handle_ping(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Me
         source: Some(state.settings.server_name.clone()),
         command: "PONG".to_owned(),
         params: reply_params,
-    })
+    }).await
 }
 
-pub fn handle_notice(_: Arc<ServerState>, _: Arc<RwLock<Client>>, _: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
+pub async fn handle_notice(_: Arc<ServerState>, _: Arc<RwLock<Client>>, _: Message) -> Result<(), Error> {
     // TODO: Actually forward notices to other users and channels
-    Box::new(future::ok(()))
+    Ok(())
 }
 
-pub fn handle_version(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    let client = client.read().expect("Client read lock broken");
+pub async fn handle_version(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let client = client.read().await;
     if let Some(target) = msg.params.get(0) {
         if target != &state.settings.server_name {
-            return command_error!(state, client, ReplyCode::ErrNoSuchServer{server: target.clone()});
+            return command_error(&state, &client, ReplyCode::ErrNoSuchServer{server: target.clone()}).await;
         }
     };
 
     let nick = client.get_nick().unwrap_or("*".to_owned());
-    client.send(make_reply_msg(&state, &nick, ReplyCode::RplVersion {comments: String::new()}));
-    client.send_issupport()
+    client.send(make_reply_msg(&state, &nick, ReplyCode::RplVersion {comments: String::new()})).await?;
+    client.send_issupport().await?;
+    Ok(())
 }
 
-pub fn handle_lusers(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    let client = client.read().expect("Client read lock broken");
+pub async fn handle_lusers(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let client = client.read().await;
     if let Some(target) = msg.params.get(0) {
         if target != &state.settings.server_name {
-            return command_error!(state, client, ReplyCode::ErrNoSuchServer{server: target.clone()});
+            return command_error(&state, &client, ReplyCode::ErrNoSuchServer{server: target.clone()}).await;
         }
     };
 
-    client.send_lusers()
+    client.send_lusers().await
 }
 
-pub fn handle_motd(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    let client = client.read().expect("Client read lock broken");
+pub async fn handle_motd(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let client = client.read().await;
     if let Some(target) = msg.params.get(0) {
         if target != &state.settings.server_name {
-            return command_error!(state, client, ReplyCode::ErrNoSuchServer{server: target.clone()});
+            return command_error(&state, &client, ReplyCode::ErrNoSuchServer{server: target.clone()}).await;
         }
     };
 
-    client.send_motd()
+    client.send_motd().await
 }
 
-pub fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error> + Send> {
-    let client = client.read().expect("Client read lock broken");
+pub async fn handle_privmsg(state: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let client = client.read().await;
     let target = match msg.params.get(0) {
         Some(nick) => nick,
-        None => return command_error!(state, client, ReplyCode::ErrNoRecipient{cmd: "PRIVMSG".to_owned()}),
+        None => return command_error(&state, &client, ReplyCode::ErrNoRecipient{cmd: "PRIVMSG".to_owned()}).await,
     };
     let msg_text = match msg.params.get(1) {
         Some(msg_text) => msg_text,
-        None => return command_error!(state, client, ReplyCode::ErrNoTextToSend),
+        None => return command_error(&state, &client, ReplyCode::ErrNoTextToSend).await,
     };
 
-    if let Some(channel_ref) = state.channels.lock().expect("State channels lock broken").get(&target.to_ascii_uppercase()) {
+    if let Some(channel_ref) = state.channels.lock().await.get(&target.to_ascii_uppercase()) {
         let channel_lock = channel_ref.clone();
-        let channel_guard = channel_lock.read().expect("Channel lock broken");
+        let channel_guard = channel_lock.read().await;
         match (state.callbacks.on_client_channel_message)(&client, &channel_guard, &msg) {
             Ok(true) => (),
-            Ok(false) => return Box::new(future::ok(())),
-            Err(e) => return command_error!(state, client, ReplyCode::ErrCannotSendToChan{channel: target.clone(), reason: e.to_string()}),
+            Ok(false) => return Ok(()),
+            Err(e) => return command_error(&state, &client, ReplyCode::ErrCannotSendToChan{channel: target.clone(), reason: e.to_string()}).await,
         }
         channel_guard.send(Message {
             tags: Vec::new(),
             source: Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!")),
             command: "PRIVMSG".to_owned(),
             params: vec!(channel_guard.name.to_owned(), msg_text.to_owned()),
-        }, Some(client.addr.to_string()))
+        }, Some(client.addr.to_string())).await
     } else if target.to_ascii_uppercase() == client.get_nick().expect("PRIVMSG sent by user without a nick!").to_ascii_uppercase() {
         let nick = client.get_nick().unwrap().to_owned();
+        let prefix = Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!"));
         client.send(Message {
             tags: Vec::new(),
-            source: Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!")),
+            source: prefix,
             command: "PRIVMSG".to_owned(),
             params: vec!(nick, msg_text.to_owned()),
-        })
-    } else if let Some(target_user) = state.users.lock().expect("State users lock broken").get(&target.to_ascii_uppercase()) {
+        }).await
+    } else if let Some(target_user) = state.users.lock().await.get(&target.to_ascii_uppercase()) {
         let target_user = match target_user.upgrade() {
             Some(target_user) => target_user,
-            None => return command_error!(state, client, ReplyCode::ErrNoSuchNick{nick: target.clone()}),
+            None => return command_error(&state, &client, ReplyCode::ErrNoSuchNick{nick: target.clone()}).await,
         };
-        let target_user = target_user.read().expect("User read lock broken");
+        let target_user = target_user.read().await;
         let nick = target_user.get_nick().unwrap().to_owned();
+        let prefix = Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!"));
         target_user.send(Message {
             tags: Vec::new(),
-            source: Some(client.get_extended_prefix().expect("PRIVMSG sent by user without a prefix!")),
+            source: prefix,
             command: "PRIVMSG".to_owned(),
             params: vec!(nick, msg_text.to_owned()),
-        })
+        }).await
     } else {
-        return command_error!(state, client, ReplyCode::ErrNoSuchNick{nick: target.clone()});
+        return command_error(&state, &client, ReplyCode::ErrNoSuchNick{nick: target.clone()}).await;
     }
 }
 
-pub fn handle_quit(_: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Box<Future<Item=(), Error=Error>  + Send> {
-    let client = client.read().expect("Client read lock broken");
+pub async fn handle_quit(_: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    let client = client.read().await;
     let reason = msg.params.get(0).map(|str| str.to_owned()).unwrap_or("Quit".to_owned());
     if let ClientStatus::Unregistered{..} = client.status {
-        return Box::new(future::err(Error::new(ErrorKind::Other, reason.clone())));
+        return Err(Error::new(ErrorKind::Other, reason.clone()));
     }
 
     client.broadcast(Message {
@@ -122,10 +126,11 @@ pub fn handle_quit(_: Arc<ServerState>, client: Arc<RwLock<Client>>, msg: Messag
         source: Some(client.get_extended_prefix().unwrap()),
         command: "QUIT".to_owned(),
         params: vec!(reason.clone()),
-    }, true).wait().ok();
+    }, true).await?;
 
-    let mut channels = client.channels.write().expect("Client channels write lock broken");
+    let mut channels = client.channels.write().await;
     channels.clear();
 
-    Box::new(future::err(Error::new(ErrorKind::Other, reason.clone())))
+    // We return an "error" to signal the quit
+    Err(Error::new(ErrorKind::Other, reason.clone()))
 }
