@@ -87,14 +87,20 @@ pub async fn handle_whois(state: Arc<ServerState>, client: Arc<RwLock<Client>>, 
     let client = client.read().await;
     let client_nick = &client.get_nick().expect("unregistered client sent a WHOIS");
 
-    // We don't handle the /whois <server> <nickmasks> syntax
-    if msg.params.len() != 1 {
+    // We don't handle the /whois <server> <nickmasks> syntax, except when server==nickmask
+    let masks = if msg.params.len() == 1 {
+        &msg.params[0]
+    } else if msg.params.len() == 2 {
+        if msg.params[0] != msg.params[1] {
+            return command_error(&state, &client, ReplyCode::ErrNoSuchServer { server: msg.params[0].clone() }).await;
+        }
+        &msg.params[1]
+    } else {
         return command_error(&state, &client, ReplyCode::ErrNeedMoreParams { cmd: "WHOIS".to_owned() }).await;
-    }
+    };
 
     // We only reply to WHOIS for the first nickmask. Why? That's just what Freenode seems to do...
     let mut users_matched = HashSet::new();
-    let masks = msg.params.get(0).unwrap();
     if let Some(mask) = masks.split(',').next() {
         let users_guard = state.users.read().await;
         for (user_addr, weak_user) in users_guard.iter() {
