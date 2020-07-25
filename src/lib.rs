@@ -1,3 +1,4 @@
+#![feature(backtrace)]
 #![allow(clippy::useless_format)]
 
 mod client;

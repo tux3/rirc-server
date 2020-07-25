@@ -15,6 +15,9 @@ use crate::server::ServerState;
 use crate::errors::ChannelNotFoundError;
 use crate::mode::{UserMode, CHANMODES};
 
+#[cfg(feature = "tls")]
+use tokio_rustls::server::TlsStream;
+
 pub struct ClientUnregisteredState {
     pub nick: Option<String>,
     pub username: Option<String>,
@@ -50,14 +53,30 @@ pub struct ClientDuplex {
 }
 
 impl ClientDuplex {
-    pub fn new(server_state: Arc<ServerState>, socket: TcpStream) -> ClientDuplex {
+    pub fn from_tcp_stream(server_state: Arc<ServerState>, socket: TcpStream) -> ClientDuplex {
         let addr = socket.peer_addr().unwrap();
         let (socket_r, socket_w) = socket.into_split();
+        let sink = Box::pin(MessageSink::new(socket_w));
         let stream = Box::pin(MessageStream::new(BufReader::new(socket_r)));
+        Self::from_sink_and_stream(server_state, addr, stream, sink)
+    }
+
+    #[cfg(feature = "tls")]
+    pub fn from_tls_stream(server_state: Arc<ServerState>, socket: TlsStream<TcpStream>) -> ClientDuplex {
+        let addr = socket.get_ref().0.peer_addr().unwrap();
+        let (socket_r, socket_w) = tokio::io::split(socket);
+        let sink = Box::pin(MessageSink::new(socket_w));
+        let stream = Box::pin(MessageStream::new(BufReader::new(socket_r)));
+        Self::from_sink_and_stream(server_state, addr, stream, sink)
+    }
+
+    fn from_sink_and_stream(server_state: Arc<ServerState>, addr: SocketAddr,
+                            stream: Pin<Box<dyn Stream<Item=Result<Message, Error>> + Send>>,
+                            sink: Pin<Box<dyn Sink<Message, Error=Error> + Send + Sync>>) -> ClientDuplex {
         ClientDuplex {
             stream,
             client: Client {
-                sink: RwLock::new(Box::pin(MessageSink::new(socket_w))),
+                sink: RwLock::new(sink),
                 server_state,
                 addr,
                 status: ClientStatus::Unregistered(ClientUnregisteredState::new()),

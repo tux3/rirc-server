@@ -10,8 +10,11 @@ use chrono::{DateTime, Local};
 use std::io::Error;
 use std::sync::{Arc, Weak};
 use std::collections::HashMap;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{RwLock, Mutex};
+
+#[cfg(feature = "tls")]
+use tokio_rustls::{TlsAcceptor, rustls::ServerConfig};
 
 pub struct ServerState {
     pub settings: ServerSettings,
@@ -44,28 +47,71 @@ impl ServerState {
 
 pub struct Server {
     state: Arc<ServerState>,
+
+    #[cfg(feature = "tls")]
+    tls_acceptor: Option<TlsAcceptor>,
+    #[cfg(not(feature = "tls"))]
+    #[allow(dead_code)]
+    tls_acceptor: Option<()>,
 }
 
 impl Server {
     pub fn new(settings: ServerSettings, callbacks: ServerCallbacks) -> Server {
         Server {
             state: ServerState::new(settings, callbacks),
+            tls_acceptor: None,
         }
     }
 
-    pub async fn start(&mut self) -> Result<(), Error> {
-        let state_ref = Arc::downgrade(&self.state);
+    #[cfg(feature = "tls")]
+    /// Uses the provided TLS configuration for IRC connections
+    pub fn use_tls(&mut self, tls_config: Arc<ServerConfig>) {
+        self.tls_acceptor = Some(TlsAcceptor::from(tls_config));
+    }
 
+    pub async fn start(&mut self) -> Result<(), Error> {
         let mut listener = TcpListener::bind(&self.state.settings.listen_addr).await?;
         let mut incoming = listener.incoming();
 
         while let Some(socket) = incoming.next().await {
             let socket = socket?;
-            let state = state_ref.upgrade().expect("Server state dropped while still accepting clients!");
-            tokio::spawn(Server::handle_client(state.clone(), ClientDuplex::new(state, socket)));
+            let addr = match socket.peer_addr() {
+                Ok(a) => a,
+                Err(err) => {
+                    println!("Failed to get new client's peer addr: {}", err);
+                    continue;
+                }
+            };
+            let client = match self.accept_client(socket).await {
+                Ok(c) => c,
+                Err(err) => {
+                    println!("{}: {}", addr, err);
+                    continue;
+                }
+            };
+
+            tokio::spawn(Server::handle_client(self.state.clone(), client));
         }
 
         Ok(())
+    }
+
+    #[cfg(not(feature = "tls"))]
+    async fn accept_client(&self, socket: TcpStream) -> Result<ClientDuplex, Error> {
+        Ok(ClientDuplex::from_tcp_stream(self.state.clone(), socket))
+    }
+
+    #[cfg(feature = "tls")]
+    async fn accept_client(&self, socket: TcpStream) -> Result<ClientDuplex, Error> {
+        let client = if self.tls_acceptor.is_some() {
+            let acceptor = self.tls_acceptor.clone().unwrap();
+            let tls_sock = acceptor.accept(socket).await?;
+
+            ClientDuplex::from_tls_stream(self.state.clone(), tls_sock)
+        } else {
+            ClientDuplex::from_tcp_stream(self.state.clone(), socket)
+        };
+        Ok(client)
     }
 
     async fn handle_client(state: Arc<ServerState>, mut client_duplex: ClientDuplex) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
