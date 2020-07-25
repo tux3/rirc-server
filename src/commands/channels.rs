@@ -246,12 +246,14 @@ pub async fn handle_mode(state: Arc<ServerState>, client_lock: Arc<RwLock<Client
     if target.starts_with('#') {
         if let Some(channel_ref) = state.channels.lock().await.get(&target.to_ascii_uppercase()) {
             let channel_lock = channel_ref.clone();
-            handle_channel_mode(state.clone(), client_lock.clone(), channel_lock, target, modestring).await?;
+            drop(client);
+            handle_channel_mode(state.clone(), client_lock, channel_lock, target, modestring).await?;
         } else {
             command_error(&state, &client, ReplyCode::ErrNoSuchChannel{channel: target.clone()}).await?;
         }
     } else if target == client_nick {
-        handle_user_mode(state, client_lock.clone(), target, modestring).await?;
+        drop(client);
+        handle_user_mode(state, client_lock, target, modestring).await?;
     } else if state.users.read().await.contains_key(target) {
         command_error(&state, &client, ReplyCode::ErrUsersDontMatch).await?;
     } else {

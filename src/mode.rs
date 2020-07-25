@@ -64,6 +64,7 @@ pub trait BaseMode: ToString {
 pub struct UserMode {
     pub invisible: bool,
     pub see_wallops: bool,
+    pub is_bot: bool,
 }
 
 impl Default for UserMode {
@@ -71,6 +72,7 @@ impl Default for UserMode {
         Self {
             invisible: true,
             see_wallops: false,
+            is_bot: false,
         }
     }
 }
@@ -80,6 +82,7 @@ impl BaseMode for UserMode {
         Some(match mode {
             b'i' => &mut self.invisible,
             b'w' => &mut self.see_wallops,
+            b'B' => &mut self.is_bot,
             _ => return None,
         })
     }
@@ -90,6 +93,7 @@ impl ToString for UserMode {
         let mut modestring = "+".to_owned();
         if self.invisible { modestring.push('i'); }
         if self.see_wallops { modestring.push('w'); }
+        if self.is_bot { modestring.push('B'); }
 
         modestring
     }
