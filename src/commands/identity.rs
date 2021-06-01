@@ -136,8 +136,8 @@ mod tests {
         let mut names = HashSet::new();
         let mut handlers = HashSet::new();
         for cmd in COMMANDS_LIST {
-            assert!(names.insert(cmd.name), format!("Command {} appears twice in the list", cmd.name));
-            assert!(handlers.insert(cmd.handler as usize), format!("Command {}'s handler is a duplicate", cmd.name));
+            assert!(names.insert(cmd.name), "Command {} appears twice in the list", cmd.name);
+            assert!(handlers.insert(cmd.handler as usize), "Command {}'s handler is a duplicate", cmd.name);
         }
     }
 

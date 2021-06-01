@@ -47,7 +47,7 @@ impl Message {
         let mut msgs = Vec::new();
         let base_len = base_msg.to_line().len();
 
-        let max_param_len = MAX_LENGTH - base_len;
+        let max_param_len = MAX_LENGTH - base_len - 1;
         let mut next_trailing = String::new();
         let mut params = params.into_iter().peekable();
         while let Some(param) = params.next() {
@@ -102,14 +102,12 @@ impl Message {
             }
         }
 
-        line+"\r\n"
+        line
     }
 
     fn consume_tags(msg_line: &str) -> (Vec<MessageTag>, &str) {
-        assert!(msg_line.ends_with('\n'));
-        let new_end = msg_line.len() - if msg_line.ends_with("\r\n") { 2 } else { 1 };
-        let msg_line = msg_line[..new_end].trim_start();
-
+        assert!(!msg_line.ends_with('\n'));
+        let msg_line = msg_line.trim_start();
         if msg_line.bytes().next() == Some(b'@') {
             let (tags_word, next_msg_line) = if let Some(next_space) = msg_line.find(' ') {
                 (&msg_line[1..next_space], &msg_line[next_space..])
@@ -170,12 +168,22 @@ impl Message {
 mod tests {
     use super::*;
 
-    fn check(msg_line: &str, msg_is_normalized: bool, tags: &[(&str, Option<&str>)], source: Option<&str>, command: &str, params: &[&str]) {
-        let msg_line = &(msg_line.to_owned()+"\r\n");
-        let tags = tags.iter().map(|&(name, value)| MessageTag {
-            name: name.to_string(),
-            value: value.map(|s| s.to_string()),
-        }).collect::<Vec<_>>();
+    fn check(
+        msg_line: &str,
+        msg_is_normalized: bool,
+        tags: &[(&str, Option<&str>)],
+        source: Option<&str>,
+        command: &str,
+        params: &[&str],
+    ) {
+        let msg_line = &(msg_line.to_owned());
+        let tags = tags
+            .iter()
+            .map(|&(name, value)| MessageTag {
+                name: name.to_string(),
+                value: value.map(|s| s.to_string()),
+            })
+            .collect::<Vec<_>>();
         let parsed_msg = Message::new(msg_line);
         assert_eq!(parsed_msg.tags, tags);
         assert_eq!(parsed_msg.source, source.map(|s| s.to_string()));
@@ -189,16 +197,18 @@ mod tests {
     // Test vectors happily copied from https://github.com/grawity/code/blob/3d9e1c43ef07671eda92289240ef7570d4e86b21/lib/tests/irc-split.txt
 
     #[test]
-    fn good_line_endings() {
+    fn no_line_endings() {
         let base = "foo bar baz";
-        assert_eq!(Message::new(&(base.to_owned()+"\r\n")).to_line(), base.to_owned()+"\r\n");
-        assert_eq!(Message::new(&(base.to_owned()+"\n")).to_line(), base.to_owned()+"\r\n");
+        assert_eq!(
+            Message::new(&(base.to_owned())).to_line(),
+            base.to_owned()
+        );
     }
 
     #[test]
     #[should_panic]
     fn bad_line_ending() {
-        Message::new("missing newline");
+        Message::new("extra newline\n");
     }
 
     #[test]

@@ -28,7 +28,9 @@ impl<T: AsyncWrite + Unpin> Sink<Message> for MessageSink<T> {
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
-        self.send_buffer.extend_from_slice(item.to_line().as_bytes());
+        self.send_buffer
+            .extend_from_slice(item.to_line().as_bytes());
+        self.send_buffer.push('\n' as u8);
         Ok(())
     }
 

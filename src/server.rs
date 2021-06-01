@@ -12,6 +12,7 @@ use std::sync::{Arc, Weak};
 use std::collections::HashMap;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{RwLock, Mutex};
+use tokio_stream::wrappers::TcpListenerStream;
 
 #[cfg(feature = "tls")]
 use tokio_rustls::{TlsAcceptor, rustls::ServerConfig};
@@ -70,8 +71,8 @@ impl Server {
     }
 
     pub async fn start(&mut self) -> Result<(), Error> {
-        let mut listener = TcpListener::bind(&self.state.settings.listen_addr).await?;
-        let mut incoming = listener.incoming();
+        let listener = TcpListener::bind(&self.state.settings.listen_addr).await?;
+        let mut incoming = TcpListenerStream::new(listener);
 
         while let Some(socket) = incoming.next().await {
             let socket = socket?;
