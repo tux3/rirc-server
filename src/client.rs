@@ -1,19 +1,19 @@
-use tokio::net::TcpStream;
-use tokio::io::BufReader;
-use tokio::sync::RwLock;
-use futures::{Stream, Sink, SinkExt};
-use std::sync::{Arc, Weak};
-use std::net::SocketAddr;
-use std::io::{Error, ErrorKind};
-use std::collections::{HashMap, HashSet};
-use std::collections::hash_map::{Entry};
-use futures::executor::block_on;
-use std::pin::Pin;
-use crate::message::{Message, MessageSink, MessageStream, ReplyCode, make_reply_msg};
-use crate::channel::{Channel};
-use crate::server::ServerState;
+use crate::channel::Channel;
 use crate::errors::ChannelNotFoundError;
+use crate::message::{make_reply_msg, Message, MessageSink, MessageStream, ReplyCode};
 use crate::mode::{UserMode, CHANMODES};
+use crate::server::ServerState;
+use futures::executor::block_on;
+use futures::{Sink, SinkExt, Stream};
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
+use std::io::{Error, ErrorKind};
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::{Arc, Weak};
+use tokio::io::BufReader;
+use tokio::net::TcpStream;
+use tokio::sync::RwLock;
 
 #[cfg(feature = "tls")]
 use tokio_rustls::server::TlsStream;
@@ -31,8 +31,8 @@ pub struct ClientNormalState {
 }
 
 impl ClientUnregisteredState {
-    fn new() -> ClientUnregisteredState{
-        ClientUnregisteredState{
+    fn new() -> ClientUnregisteredState {
+        ClientUnregisteredState {
             nick: None,
             username: None,
             realname: None,
@@ -48,7 +48,7 @@ pub enum ClientStatus {
 }
 
 pub struct ClientDuplex {
-    pub stream: Pin<Box<dyn Stream<Item=Result<Message, Error>> + Send>>,
+    pub stream: Pin<Box<dyn Stream<Item = Result<Message, Error>> + Send>>,
     pub client: Client,
 }
 
@@ -62,7 +62,10 @@ impl ClientDuplex {
     }
 
     #[cfg(feature = "tls")]
-    pub fn from_tls_stream(server_state: Arc<ServerState>, socket: TlsStream<TcpStream>) -> ClientDuplex {
+    pub fn from_tls_stream(
+        server_state: Arc<ServerState>,
+        socket: TlsStream<TcpStream>,
+    ) -> ClientDuplex {
         let addr = socket.get_ref().0.peer_addr().unwrap();
         let (socket_r, socket_w) = tokio::io::split(socket);
         let sink = Box::pin(MessageSink::new(socket_w));
@@ -70,9 +73,12 @@ impl ClientDuplex {
         Self::from_sink_and_stream(server_state, addr, stream, sink)
     }
 
-    fn from_sink_and_stream(server_state: Arc<ServerState>, addr: SocketAddr,
-                            stream: Pin<Box<dyn Stream<Item=Result<Message, Error>> + Send>>,
-                            sink: Pin<Box<dyn Sink<Message, Error=Error> + Send + Sync>>) -> ClientDuplex {
+    fn from_sink_and_stream(
+        server_state: Arc<ServerState>,
+        addr: SocketAddr,
+        stream: Pin<Box<dyn Stream<Item = Result<Message, Error>> + Send>>,
+        sink: Pin<Box<dyn Sink<Message, Error = Error> + Send + Sync>>,
+    ) -> ClientDuplex {
         ClientDuplex {
             stream,
             client: Client {
@@ -88,7 +94,7 @@ impl ClientDuplex {
 }
 
 pub struct Client {
-    sink: RwLock<Pin<Box<dyn Sink<Message, Error=Error> + Send + Sync>>>,
+    sink: RwLock<Pin<Box<dyn Sink<Message, Error = Error> + Send + Sync>>>,
     pub server_state: Arc<ServerState>,
     pub addr: SocketAddr,
     pub status: ClientStatus,
@@ -103,21 +109,27 @@ impl Drop for Client {
 
         match self.status {
             ClientStatus::Unregistered(_) => (),
-            ClientStatus::Normal(ClientNormalState{ref nick, ..}) => {
-                block_on(Box::pin(self.broadcast(Message {
-                    tags: Vec::new(),
-                    source: Some(self.get_extended_prefix().unwrap()),
-                    command: "QUIT".to_owned(),
-                    params: vec!("Quit".to_owned()),
-                }, false))).ok();
+            ClientStatus::Normal(ClientNormalState { ref nick, .. }) => {
+                block_on(Box::pin(self.broadcast(
+                    Message {
+                        tags: Vec::new(),
+                        source: Some(self.get_extended_prefix().unwrap()),
+                        command: "QUIT".to_owned(),
+                        params: vec!["Quit".to_owned()],
+                    },
+                    false,
+                )))
+                .ok();
 
                 block_on(self.server_state.users.write())
-                    .remove(&nick.to_ascii_uppercase()).expect("Dropped client was registered, but not in users list!");
-            },
+                    .remove(&nick.to_ascii_uppercase())
+                    .expect("Dropped client was registered, but not in users list!");
+            }
         };
 
         block_on(self.server_state.clients.lock())
-            .remove(&self.addr.to_string()).expect("Dropped client was not in client list!");
+            .remove(&self.addr.to_string())
+            .expect("Dropped client was not in client list!");
     }
 }
 
@@ -187,7 +199,7 @@ impl Client {
             let channel_users = channel_guard.users.read().await;
             for (user_addr, weak_user) in channel_users.iter() {
                 if !users_sent_to.insert(user_addr.to_string()) {
-                    continue
+                    continue;
                 }
 
                 let user_lock = match weak_user.upgrade() {
@@ -205,8 +217,10 @@ impl Client {
     /// Sends RPL_ISSUPPORT feature advertisment messages to the client
     pub async fn send_issupport(&self) -> Result<(), Error> {
         let nick = match self.status {
-            ClientStatus::Unregistered(_) => panic!("send_issupport called on unregistered client!"),
-            ClientStatus::Normal(ClientNormalState{ref nick, ..}) => nick.clone(),
+            ClientStatus::Unregistered(_) => {
+                panic!("send_issupport called on unregistered client!")
+            }
+            ClientStatus::Normal(ClientNormalState { ref nick, .. }) => nick.clone(),
         };
         let state = self.server_state.clone();
 
@@ -223,7 +237,12 @@ impl Client {
             format!("SILENCE"), // No value means we don't support SILENCE
             format!("TOPICLEN={}", state.settings.max_topic_length),
         ];
-        self.send(make_reply_msg(&state, &nick, ReplyCode::RplIsSupport {features})).await?;
+        self.send(make_reply_msg(
+            &state,
+            &nick,
+            ReplyCode::RplIsSupport { features },
+        ))
+        .await?;
         Ok(())
     }
 
@@ -231,7 +250,7 @@ impl Client {
     pub async fn send_lusers(&self) -> Result<(), Error> {
         let nick = match self.status {
             ClientStatus::Unregistered(_) => panic!("send_luser called on unregistered client!"),
-            ClientStatus::Normal(ClientNormalState{ref nick, ..}) => nick.clone(),
+            ClientStatus::Normal(ClientNormalState { ref nick, .. }) => nick.clone(),
         };
         let state = self.server_state.clone();
 
@@ -255,14 +274,36 @@ impl Client {
         let num_visibles = num_users - num_invisibles;
         let num_unknowns = state.clients.lock().await.len() - num_users;
         self.send_all(&[
-            make_reply_msg(&state, &nick, ReplyCode::RplLuserClient {num_visibles, num_invisibles}),
-            make_reply_msg(&state, &nick, ReplyCode::RplLuserOp {num_ops}),
-            make_reply_msg(&state, &nick, ReplyCode::RplLuserUnknown {num_unknowns}),
-            make_reply_msg(&state, &nick, ReplyCode::RplLuserChannels {num_channels}),
-            make_reply_msg(&state, &nick, ReplyCode::RplLuserMe {num_users}),
-            make_reply_msg(&state, &nick, ReplyCode::RplLocalUsers {num_users, max_users_seen}),
-            make_reply_msg(&state, &nick, ReplyCode::RplGlobalUsers {num_users, max_users_seen}),
-        ]).await?;
+            make_reply_msg(
+                &state,
+                &nick,
+                ReplyCode::RplLuserClient {
+                    num_visibles,
+                    num_invisibles,
+                },
+            ),
+            make_reply_msg(&state, &nick, ReplyCode::RplLuserOp { num_ops }),
+            make_reply_msg(&state, &nick, ReplyCode::RplLuserUnknown { num_unknowns }),
+            make_reply_msg(&state, &nick, ReplyCode::RplLuserChannels { num_channels }),
+            make_reply_msg(&state, &nick, ReplyCode::RplLuserMe { num_users }),
+            make_reply_msg(
+                &state,
+                &nick,
+                ReplyCode::RplLocalUsers {
+                    num_users,
+                    max_users_seen,
+                },
+            ),
+            make_reply_msg(
+                &state,
+                &nick,
+                ReplyCode::RplGlobalUsers {
+                    num_users,
+                    max_users_seen,
+                },
+            ),
+        ])
+        .await?;
 
         Ok(())
     }
@@ -271,10 +312,15 @@ impl Client {
     pub async fn send_motd(&self) -> Result<(), Error> {
         let nick = match self.status {
             ClientStatus::Unregistered(_) => panic!("send_motd called on unregistered client!"),
-            ClientStatus::Normal(ClientNormalState{ref nick, ..}) => nick.clone(),
+            ClientStatus::Normal(ClientNormalState { ref nick, .. }) => nick.clone(),
         };
 
-        self.send(make_reply_msg(&self.server_state, &nick, ReplyCode::ErrNoMotd)).await?;
+        self.send(make_reply_msg(
+            &self.server_state,
+            &nick,
+            ReplyCode::ErrNoMotd,
+        ))
+        .await?;
         Ok(())
     }
 
@@ -285,8 +331,13 @@ impl Client {
             tags: Vec::new(),
             source: None,
             command: "ERROR".to_owned(),
-            params: vec!(format!("Closing Link: {} ({})", &self.addr.ip(), explanation)),
-        }).await?;
+            params: vec![format!(
+                "Closing Link: {} ({})",
+                &self.addr.ip(),
+                explanation
+            )],
+        })
+        .await?;
 
         Err(Error::new(ErrorKind::Other, explanation))
     }
@@ -297,19 +348,29 @@ impl Client {
         let cur_nick: String;
         let registered_status = match self.status {
             ClientStatus::Unregistered(ClientUnregisteredState {
-                                           nick: Some(ref nick),
-                                           username: Some(ref username),
-                                           realname: Some(ref realname) }) => {
+                nick: Some(ref nick),
+                username: Some(ref username),
+                realname: Some(ref realname),
+            }) => {
                 cur_nick = nick.clone();
-                ClientStatus::Normal(ClientNormalState{nick: nick.clone(), username: username.clone(), realname: realname.clone()})
-            },
+                ClientStatus::Normal(ClientNormalState {
+                    nick: nick.clone(),
+                    username: username.clone(),
+                    realname: realname.clone(),
+                })
+            }
             _ => return Ok(false),
         };
 
         let state = self.server_state.clone();
         let weak_self = match state.clients.lock().await.get(&self.addr.to_string()) {
             Some(weak) => weak.clone(),
-            None => return Err(Error::new(ErrorKind::Other, "User completed registration, but is not in the client list!")),
+            None => {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    "User completed registration, but is not in the client list!",
+                ))
+            }
         };
 
         {
@@ -342,7 +403,8 @@ impl Client {
             make_reply_msg(&state, &cur_nick, ReplyCode::RplYourHost),
             make_reply_msg(&state, &cur_nick, ReplyCode::RplCreated),
             make_reply_msg(&state, &cur_nick, ReplyCode::RplMyInfo),
-        ]).await?;
+        ])
+        .await?;
         self.send_issupport().await?;
         self.send_lusers().await?;
         self.send_motd().await?;
@@ -355,19 +417,25 @@ impl Client {
     /// Joins a channel, assuming it doesn't violate any rules
     pub async fn join(&self, chan_name: &str) -> Result<(), Error> {
         if !chan_name.starts_with('#') {
-            return Err(Error::new(ErrorKind::InvalidInput, "Channels must start with a #"));
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Channels must start with a #",
+            ));
         }
         if self.channels.read().await.len() >= self.server_state.settings.chan_limit {
-            return Err(Error::new(ErrorKind::Other, "Cannot join, too many channels"));
+            return Err(Error::new(
+                ErrorKind::Other,
+                "Cannot join, too many channels",
+            ));
         }
 
         let channel_arc = {
             let mut channels = self.server_state.channels.lock().await;
             match channels.entry(chan_name.to_ascii_uppercase()) {
                 Entry::Occupied(entry) => entry.get().clone(),
-                Entry::Vacant(entry) => {
-                    entry.insert(Arc::new(RwLock::new(Channel::new(chan_name.to_owned())))).clone()
-                },
+                Entry::Vacant(entry) => entry
+                    .insert(Arc::new(RwLock::new(Channel::new(chan_name.to_owned()))))
+                    .clone(),
             }
         };
 
@@ -377,31 +445,47 @@ impl Client {
                 Entry::Occupied(_) => return Ok(()),
                 Entry::Vacant(entry) => {
                     entry.insert(Arc::downgrade(&channel_arc));
-                },
+                }
             };
         }
 
-        let weak_self = match self.server_state.clients.lock().await.get(&self.addr.to_string()) {
+        let weak_self = match self
+            .server_state
+            .clients
+            .lock()
+            .await
+            .get(&self.addr.to_string())
+        {
             Some(weak) => weak.clone(),
-            None => return Err(Error::new(ErrorKind::Other, "User completed registration, but is not in the client list!")),
+            None => {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    "User completed registration, but is not in the client list!",
+                ))
+            }
         };
 
         let channel_guard = channel_arc.read().await;
         let mut chan_users_guard = channel_guard.users.write().await;
         chan_users_guard.insert(self.addr.to_string(), weak_self);
-        let chan_join_msgs = channel_guard.get_join_msgs(&self.server_state, &self.get_nick().unwrap()).await;
+        let chan_join_msgs = channel_guard
+            .get_join_msgs(&self.server_state, &self.get_nick().unwrap())
+            .await;
 
         let join_msg = Message {
             tags: Vec::new(),
-            source: Some(self.get_extended_prefix().expect("JOIN sent by user without a prefix!")),
+            source: Some(
+                self.get_extended_prefix()
+                    .expect("JOIN sent by user without a prefix!"),
+            ),
             command: "JOIN".to_owned(),
-            params: vec!(channel_guard.name.to_owned()),
+            params: vec![channel_guard.name.to_owned()],
         };
 
         let addr_string = self.addr.to_string();
         for (chan_user_addr, chan_user_weak) in chan_users_guard.iter() {
             if *chan_user_addr == addr_string {
-                continue
+                continue;
             }
             let chan_user = match chan_user_weak.upgrade() {
                 Some(user) => user,
@@ -420,20 +504,33 @@ impl Client {
     pub async fn part(&self, channel_name: &str) -> Result<(), Error> {
         let channel = {
             let mut channels_guard = self.channels.write().await;
-            channels_guard.remove(&channel_name.to_ascii_uppercase()).and_then(|weak| weak.upgrade())
+            channels_guard
+                .remove(&channel_name.to_ascii_uppercase())
+                .and_then(|weak| weak.upgrade())
         };
         if channel.is_none() {
-            return Err(Error::new(ErrorKind::NotFound, ChannelNotFoundError::new(channel_name.to_owned())))
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                ChannelNotFoundError::new(channel_name.to_owned()),
+            ));
         }
         let channel = channel.unwrap();
 
         let channel_guard = channel.read().await;
-        let result = channel_guard.send(Message {
-            tags: Vec::new(),
-            source: Some(self.get_extended_prefix().expect("part called on a user without a prefix!")),
-            command: "PART".to_owned(),
-            params: vec!(channel_guard.name.to_owned()),
-        }, None).await;
+        let result = channel_guard
+            .send(
+                Message {
+                    tags: Vec::new(),
+                    source: Some(
+                        self.get_extended_prefix()
+                            .expect("part called on a user without a prefix!"),
+                    ),
+                    command: "PART".to_owned(),
+                    params: vec![channel_guard.name.to_owned()],
+                },
+                None,
+            )
+            .await;
         drop(channel_guard);
 
         let channel_guard = channel.read().await;

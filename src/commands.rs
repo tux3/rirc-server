@@ -1,13 +1,13 @@
 use crate::client::{Client, ClientStatus};
+use crate::message::{make_reply_msg, Message, ReplyCode};
 use crate::server::ServerState;
-use crate::message::{Message, ReplyCode, make_reply_msg};
-use futures::{Future};
-use std::io::{Error};
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::pin::Pin;
-use tokio::sync::RwLock;
+use futures::Future;
 use lazy_static::lazy_static;
+use std::collections::HashMap;
+use std::io::Error;
+use std::pin::Pin;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 macro_rules! pub_use_submodules {
     ( $( $name:ident ),* ) => {
@@ -27,8 +27,9 @@ enum CommandNamespace {
     Normal,
 }
 
-type CommandHandlerFuture = Pin<Box<dyn Future<Output=Result<(), Error>> + Send>>;
-pub type CommandHandler = fn(Arc<ServerState>, Arc<RwLock<Client>>, Message) -> CommandHandlerFuture;
+type CommandHandlerFuture = Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>;
+pub type CommandHandler =
+    fn(Arc<ServerState>, Arc<RwLock<Client>>, Message) -> CommandHandlerFuture;
 
 pub struct Command {
     pub name: &'static str,
@@ -87,7 +88,11 @@ lazy_static! {
 }
 
 /// Sending an error reply (only if the client has a nick)
-pub async fn command_error(state: &ServerState, client: &Client, err: ReplyCode) -> Result<(), Error> {
+pub async fn command_error(
+    state: &ServerState,
+    client: &Client,
+    err: ReplyCode,
+) -> Result<(), Error> {
     if let Some(nick) = client.get_nick() {
         client.send(make_reply_msg(state, &nick, err)).await?
     }
@@ -98,9 +103,6 @@ pub async fn command_error(state: &ServerState, client: &Client, err: ReplyCode)
 pub fn is_command_available(cmd: &Command, client: &Client) -> bool {
     match cmd.permissions {
         CommandNamespace::Any => true,
-        CommandNamespace::Normal => match client.status {
-            ClientStatus::Normal(_) => true,
-            _ => false,
-        },
+        CommandNamespace::Normal => matches!(client.status, ClientStatus::Normal(_)),
     }
 }

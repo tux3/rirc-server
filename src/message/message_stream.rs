@@ -1,10 +1,10 @@
-use tokio::io::{AsyncRead, AsyncBufRead, AsyncBufReadExt, Lines};
-use std::io::{Error};
-use futures::{Stream, ready};
+use futures::{ready, Stream};
+use std::io::Error;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, Lines};
 
 use crate::message::Message;
-use std::task::{Context, Poll};
 use std::pin::Pin;
+use std::task::{Context, Poll};
 
 // A Stream for receiving IRC messages
 #[must_use = "streams do nothing unless polled"]
@@ -14,9 +14,7 @@ pub struct MessageStream<T: AsyncRead + AsyncBufRead + Unpin> {
 
 impl<T: AsyncRead + AsyncBufRead + Unpin> MessageStream<T> {
     pub fn new(io: T) -> MessageStream<T> {
-        MessageStream {
-            lines: io.lines(),
-        }
+        MessageStream { lines: io.lines() }
     }
 }
 

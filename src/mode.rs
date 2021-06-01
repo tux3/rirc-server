@@ -18,12 +18,17 @@ pub trait BaseMode: ToString {
                 b'+' => positive = true,
                 b'-' => positive = false,
                 _ => {
-                    let result = self.apply_mode(c, positive, &mut last_positive_applied, &mut applied_modestring);
+                    let result = self.apply_mode(
+                        c,
+                        positive,
+                        &mut last_positive_applied,
+                        &mut applied_modestring,
+                    );
                     if result.is_err() {
                         had_unknown_mode = true;
                         unknown_mode = c as char;
                     }
-                },
+                }
             }
         }
 
@@ -35,7 +40,13 @@ pub trait BaseMode: ToString {
     }
 
     /// Updates self and the modestring, if there was a change
-    fn apply_mode(&mut self, mode: u8, positive: bool, last_positive_applied: &mut bool, modestring: &mut String) -> Result<(), ()> {
+    fn apply_mode(
+        &mut self,
+        mode: u8,
+        positive: bool,
+        last_positive_applied: &mut bool,
+        modestring: &mut String,
+    ) -> Result<(), ()> {
         let target = match self.get_mode_bool(mode) {
             Some(target) => target,
             None => return Err(()),
@@ -91,9 +102,15 @@ impl BaseMode for UserMode {
 impl ToString for UserMode {
     fn to_string(&self) -> String {
         let mut modestring = "+".to_owned();
-        if self.invisible { modestring.push('i'); }
-        if self.see_wallops { modestring.push('w'); }
-        if self.is_bot { modestring.push('B'); }
+        if self.invisible {
+            modestring.push('i');
+        }
+        if self.see_wallops {
+            modestring.push('w');
+        }
+        if self.is_bot {
+            modestring.push('B');
+        }
 
         modestring
     }
@@ -117,7 +134,9 @@ impl Default for ChannelMode {
 impl ToString for ChannelMode {
     fn to_string(&self) -> String {
         let mut modestring = "+".to_owned();
-        if self.no_external_msgs { modestring.push('n'); }
+        if self.no_external_msgs {
+            modestring.push('n');
+        }
 
         modestring
     }

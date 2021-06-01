@@ -1,15 +1,15 @@
-use crate::client::{Client};
-use crate::message::{Message, ReplyCode, make_reply_msg};
-use crate::server::ServerState;
-use tokio::sync::RwLock;
-use std::sync::Weak;
-use std::collections::HashMap;
-use futures::FutureExt;
-use std::io::Error;
-use futures::future;
-use chrono::{DateTime, Local};
-use std::time::{SystemTime, UNIX_EPOCH};
+use crate::client::Client;
+use crate::message::{make_reply_msg, Message, ReplyCode};
 use crate::mode::ChannelMode;
+use crate::server::ServerState;
+use chrono::{DateTime, Local};
+use futures::future;
+use futures::FutureExt;
+use std::collections::HashMap;
+use std::io::Error;
+use std::sync::Weak;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
 
 pub struct Topic {
     pub text: String,
@@ -31,7 +31,10 @@ impl Channel {
             name,
             topic: None,
             users: RwLock::new(HashMap::new()),
-            creation_timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            creation_timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             mode: Default::default(),
         }
     }
@@ -49,9 +52,22 @@ impl Channel {
             }
         }
 
-        let base_msg = make_reply_msg(state, client_nick, ReplyCode::RplNameReply{symbol: '=', channel: self.name.clone()});
+        let base_msg = make_reply_msg(
+            state,
+            client_nick,
+            ReplyCode::RplNameReply {
+                symbol: '=',
+                channel: self.name.clone(),
+            },
+        );
         msgs.extend(Message::split_trailing_args(base_msg, names, " "));
-        msgs.push(make_reply_msg(state, client_nick, ReplyCode::RplEndOfNames{channel: self.name.clone()}));
+        msgs.push(make_reply_msg(
+            state,
+            client_nick,
+            ReplyCode::RplEndOfNames {
+                channel: self.name.clone(),
+            },
+        ));
         msgs
     }
 
@@ -60,10 +76,23 @@ impl Channel {
     pub async fn get_join_msgs(&self, state: &ServerState, client_nick: &str) -> Vec<Message> {
         let mut msgs = Vec::new();
         if let Some(ref topic) = self.topic {
-            msgs.push(make_reply_msg(state, client_nick,
-                                     ReplyCode::RplTopic{channel: self.name.clone(), text: topic.text.clone()}));
-            msgs.push(make_reply_msg(state, client_nick,
-                                     ReplyCode::RplTopicWhoTime{channel: self.name.clone(), who: topic.set_by_host.clone(), time: topic.set_at}));
+            msgs.push(make_reply_msg(
+                state,
+                client_nick,
+                ReplyCode::RplTopic {
+                    channel: self.name.clone(),
+                    text: topic.text.clone(),
+                },
+            ));
+            msgs.push(make_reply_msg(
+                state,
+                client_nick,
+                ReplyCode::RplTopicWhoTime {
+                    channel: self.name.clone(),
+                    who: topic.set_by_host.clone(),
+                    time: topic.set_at,
+                },
+            ));
         }
 
         msgs.append(&mut self.get_names_msgs(state, client_nick).await);
@@ -71,7 +100,11 @@ impl Channel {
     }
 
     /// Sends a message to all members of a channel
-    pub async fn send(&self, message: Message, exclude_user_addr: Option<String>) -> Result<(), Error> {
+    pub async fn send(
+        &self,
+        message: Message,
+        exclude_user_addr: Option<String>,
+    ) -> Result<(), Error> {
         let users_guard = self.users.read().await;
         let mut futs = Vec::new();
         for user in users_guard.values() {
@@ -84,12 +117,14 @@ impl Channel {
             let message = message.clone();
             futs.push(async move {
                 let user_guard = user.read().await;
-                if exclude_user_addr.is_none() || exclude_user_addr.as_ref().unwrap() != &user_guard.addr.to_string() {
+                if exclude_user_addr.is_none()
+                    || exclude_user_addr.as_ref().unwrap() != &user_guard.addr.to_string()
+                {
                     user_guard.send(message).boxed().await?;
                 }
                 Result::<(), Error>::Ok(())
             })
-        };
+        }
         let results = future::join_all(futs).await;
         for result in results {
             result?;

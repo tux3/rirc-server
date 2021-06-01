@@ -1,8 +1,8 @@
+use crate::channel::Channel;
+use crate::client::Client;
+use crate::message::Message;
 use std::error::Error;
 use std::net::SocketAddr;
-use crate::client::Client;
-use crate::channel::Channel;
-use crate::message::Message;
 
 type CallbackResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -21,12 +21,12 @@ pub struct ServerCallbacks {
 
 impl Default for ServerCallbacks {
     fn default() -> Self {
-        ServerCallbacks{
+        ServerCallbacks {
             on_client_connect: |_| Ok(true),
             on_client_registering: |_| Ok(true),
             on_client_registered: |_| Ok(()),
             on_client_disconnect: |_| Ok(()),
-            on_client_channel_message: |_,_,_| Ok(true),
+            on_client_channel_message: |_, _, _| Ok(true),
         }
     }
 }

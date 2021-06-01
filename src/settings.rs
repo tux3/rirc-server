@@ -25,7 +25,7 @@ pub struct ServerSettings {
 
 impl Default for ServerSettings {
     fn default() -> Self {
-        ServerSettings{
+        ServerSettings {
             listen_addr: "0.0.0.0:6667".parse().unwrap(),
             server_name: "rirc-server".to_owned(),
             server_info: "Default server".to_owned(),

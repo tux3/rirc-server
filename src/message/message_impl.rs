@@ -1,5 +1,3 @@
-use std::mem::replace;
-
 /// Maximum length of a serialized message in bytes
 pub const MAX_LENGTH: usize = 512;
 
@@ -13,7 +11,7 @@ pub struct MessageTag {
 impl ToString for MessageTag {
     fn to_string(&self) -> String {
         match self.value {
-            Some(ref value) => self.name.to_owned()+"="+&value,
+            Some(ref value) => self.name.to_owned() + "=" + &value,
             None => self.name.to_owned(),
         }
     }
@@ -43,7 +41,11 @@ impl Message {
     }
 
     /// If a message may have a very long trailing parameter, split it into multiple messages
-    pub fn split_trailing_args(base_msg: Message, params: Vec<String>, separator: &str) -> Vec<Message> {
+    pub fn split_trailing_args(
+        base_msg: Message,
+        params: Vec<String>,
+        separator: &str,
+    ) -> Vec<Message> {
         let mut msgs = Vec::new();
         let base_len = base_msg.to_line().len();
 
@@ -54,7 +56,7 @@ impl Message {
             let param_len = param.len() + separator.len();
             if !next_trailing.is_empty() && next_trailing.len() + param_len >= max_param_len {
                 let mut next_msg = base_msg.clone();
-                next_msg.params.push(replace(&mut next_trailing, String::new()));
+                next_msg.params.push(std::mem::take(&mut next_trailing));
                 msgs.push(next_msg);
             }
 
@@ -74,14 +76,21 @@ impl Message {
     }
 
     pub fn to_line(&self) -> String {
-        let mut line =  if self.tags.is_empty() {
+        let mut line = if self.tags.is_empty() {
             String::new()
         } else {
-            "@".to_owned()+&self.tags.iter().map(|tag| tag.to_string()).collect::<Vec<_>>().join(";")+" "
+            "@".to_owned()
+                + &self
+                    .tags
+                    .iter()
+                    .map(|tag| tag.to_string())
+                    .collect::<Vec<_>>()
+                    .join(";")
+                + " "
         };
 
         if let Some(ref source) = self.source {
-            line = line+":"+&source+" ";
+            line = line + ":" + &source + " ";
         }
 
         // Empty command are a special case to get clean roundtrips on messages like ":only-a-source"
@@ -92,8 +101,9 @@ impl Message {
             line += &self.command;
 
             for (i, param) in self.params.iter().enumerate() {
-                if i == self.params.len() - 1 &&
-                    (param.contains(' ') || param.contains(':') || param.is_empty()) {
+                if i == self.params.len() - 1
+                    && (param.contains(' ') || param.contains(':') || param.is_empty())
+                {
                     line = line + " :" + param;
                 } else {
                     debug_assert!(!param.contains(' '));
@@ -115,19 +125,22 @@ impl Message {
                 (&msg_line[1..], "")
             };
 
-            let tags = tags_word.split(';').map(|tag| {
-                if let Some(equal) = tag.find('=') {
-                    MessageTag{
-                        name: tag[..equal].to_string(),
-                        value: Some(tag[equal+1..].to_string()),
+            let tags = tags_word
+                .split(';')
+                .map(|tag| {
+                    if let Some(equal) = tag.find('=') {
+                        MessageTag {
+                            name: tag[..equal].to_string(),
+                            value: Some(tag[equal + 1..].to_string()),
+                        }
+                    } else {
+                        MessageTag {
+                            name: tag.to_string(),
+                            value: None,
+                        }
                     }
-                } else {
-                    MessageTag{
-                        name: tag.to_string(),
-                        value: None,
-                    }
-                }
-            }).collect();
+                })
+                .collect();
             (tags, next_msg_line)
         } else {
             (Vec::new(), msg_line)
@@ -138,7 +151,10 @@ impl Message {
         let msg_line = msg_line.trim_start();
         if msg_line.bytes().next() == Some(b':') {
             match msg_line.find(' ') {
-                Some(next_space) => (Some(msg_line[1..next_space].to_string()), &msg_line[next_space..]),
+                Some(next_space) => (
+                    Some(msg_line[1..next_space].to_string()),
+                    &msg_line[next_space..],
+                ),
                 None => (Some(msg_line[1..].to_string()), ""),
             }
         } else {
@@ -156,7 +172,7 @@ impl Message {
                 None => return (command, params),
             };
             if param.bytes().next() == Some(b':') {
-                params.push(words.fold(param[1..].to_string(), |s, w| s+" "+w));
+                params.push(words.fold(param[1..].to_string(), |s, w| s + " " + w));
             } else if !param.is_empty() {
                 params.push(param.to_string());
             }
@@ -227,7 +243,14 @@ mod tests {
         check("foo :bar", false, &[], None, "foo", &["bar"]);
         check("foo bar baz", true, &[], None, "foo", &["bar", "baz"]);
         check("foo :bar baz", true, &[], None, "foo", &["bar baz"]);
-        check("foo bar :baz qux", true, &[], None, "foo", &["bar", "baz qux"]);
+        check(
+            "foo bar :baz qux",
+            true,
+            &[],
+            None,
+            "foo",
+            &["bar", "baz qux"],
+        );
         check("Chin up! ::]", true, &[], None, "Chin", &["up!", ":]"]);
     }
 
@@ -235,52 +258,220 @@ mod tests {
     fn parse_prefixed() {
         check(":foo bar baz", true, &[], Some("foo"), "bar", &["baz"]);
         check(":foo bar :baz", false, &[], Some("foo"), "bar", &["baz"]);
-        check(":foo bar :baz asdf", true, &[], Some("foo"), "bar", &["baz asdf"]);
+        check(
+            ":foo bar :baz asdf",
+            true,
+            &[],
+            Some("foo"),
+            "bar",
+            &["baz asdf"],
+        );
         check(":foo bar :", true, &[], Some("foo"), "bar", &[""]);
         check(":foo bar :  ", true, &[], Some("foo"), "bar", &["  "]);
-        check(":foo bar : baz asdf", true, &[], Some("foo"), "bar", &[" baz asdf"]);
+        check(
+            ":foo bar : baz asdf",
+            true,
+            &[],
+            Some("foo"),
+            "bar",
+            &[" baz asdf"],
+        );
     }
 
     #[test]
     fn parse_tagged() {
-        check("@foo bar baz", true, &[("foo", None)], None, "bar", &["baz"]);
-        check("@foo bar :baz", false, &[("foo", None)], None, "bar", &["baz"]);
-        check("@foo bar :baz asdf", true, &[("foo", None)], None, "bar", &["baz asdf"]);
+        check(
+            "@foo bar baz",
+            true,
+            &[("foo", None)],
+            None,
+            "bar",
+            &["baz"],
+        );
+        check(
+            "@foo bar :baz",
+            false,
+            &[("foo", None)],
+            None,
+            "bar",
+            &["baz"],
+        );
+        check(
+            "@foo bar :baz asdf",
+            true,
+            &[("foo", None)],
+            None,
+            "bar",
+            &["baz asdf"],
+        );
         check("@foo bar :", true, &[("foo", None)], None, "bar", &[""]);
         check("@foo bar :  ", true, &[("foo", None)], None, "bar", &["  "]);
-        check("@foo bar : baz asdf", true, &[("foo", None)], None, "bar", &[" baz asdf"]);
+        check(
+            "@foo bar : baz asdf",
+            true,
+            &[("foo", None)],
+            None,
+            "bar",
+            &[" baz asdf"],
+        );
     }
 
     #[test]
     fn parse_prefixed_and_tagged() {
-        check("@foo :foo bar baz", true, &[("foo", None)], Some("foo"), "bar", &["baz"]);
-        check("@foo :foo bar :baz", false, &[("foo", None)], Some("foo"), "bar", &["baz"]);
-        check("@foo :foo bar :baz asdf", true, &[("foo", None)], Some("foo"), "bar", &["baz asdf"]);
-        check("@foo :foo bar :", true, &[("foo", None)], Some("foo"), "bar", &[""]);
-        check("@foo :foo bar :  ", true, &[("foo", None)], Some("foo"), "bar", &["  "]);
-        check("@foo :foo bar : baz asdf", true, &[("foo", None)], Some("foo"), "bar", &[" baz asdf"]);
+        check(
+            "@foo :foo bar baz",
+            true,
+            &[("foo", None)],
+            Some("foo"),
+            "bar",
+            &["baz"],
+        );
+        check(
+            "@foo :foo bar :baz",
+            false,
+            &[("foo", None)],
+            Some("foo"),
+            "bar",
+            &["baz"],
+        );
+        check(
+            "@foo :foo bar :baz asdf",
+            true,
+            &[("foo", None)],
+            Some("foo"),
+            "bar",
+            &["baz asdf"],
+        );
+        check(
+            "@foo :foo bar :",
+            true,
+            &[("foo", None)],
+            Some("foo"),
+            "bar",
+            &[""],
+        );
+        check(
+            "@foo :foo bar :  ",
+            true,
+            &[("foo", None)],
+            Some("foo"),
+            "bar",
+            &["  "],
+        );
+        check(
+            "@foo :foo bar : baz asdf",
+            true,
+            &[("foo", None)],
+            Some("foo"),
+            "bar",
+            &[" baz asdf"],
+        );
     }
 
     #[test]
     fn parse_tagged_with_values() {
-        check("@foo bar baz", true, &[("foo", None)], None, "bar", &["baz"]);
-        check("@foo= bar baz", true, &[("foo", Some(""))], None, "bar", &["baz"]);
-        check("@foo=bar bar baz", true, &[("foo", Some("bar"))], None, "bar", &["baz"]);
-        check("@foo=bar;baz=;qux bar baz", true, &[("foo", Some("bar")), ("baz", Some("")), ("qux", None)], None, "bar", &["baz"]);
-        check("@baz;foo=bar;qux= bar baz", true, &[("baz", None), ("foo", Some("bar")), ("qux", Some(""))], None, "bar", &["baz"]);
+        check(
+            "@foo bar baz",
+            true,
+            &[("foo", None)],
+            None,
+            "bar",
+            &["baz"],
+        );
+        check(
+            "@foo= bar baz",
+            true,
+            &[("foo", Some(""))],
+            None,
+            "bar",
+            &["baz"],
+        );
+        check(
+            "@foo=bar bar baz",
+            true,
+            &[("foo", Some("bar"))],
+            None,
+            "bar",
+            &["baz"],
+        );
+        check(
+            "@foo=bar;baz=;qux bar baz",
+            true,
+            &[("foo", Some("bar")), ("baz", Some("")), ("qux", None)],
+            None,
+            "bar",
+            &["baz"],
+        );
+        check(
+            "@baz;foo=bar;qux= bar baz",
+            true,
+            &[("baz", None), ("foo", Some("bar")), ("qux", Some(""))],
+            None,
+            "bar",
+            &["baz"],
+        );
     }
 
     #[test]
     fn parse_whitespace() {
         check(" foo bar baz", false, &[], None, "foo", &["bar", "baz"]);
         check(" :foo bar baz", false, &[], Some("foo"), "bar", &["baz"]);
-        check(" @foo bar baz", false, &[("foo", None)], None, "bar", &["baz"]);
-        check("foo   bar     baz   :asdf  ", false, &[], None, "foo", &["bar", "baz", "asdf  "]);
-        check(":foo   bar     baz   :  asdf", false, &[], Some("foo"), "bar", &["baz", "  asdf"]);
-        check("@foo   bar     baz   :  asdf", false, &[("foo", None)], None, "bar", &["baz", "  asdf"]);
+        check(
+            " @foo bar baz",
+            false,
+            &[("foo", None)],
+            None,
+            "bar",
+            &["baz"],
+        );
+        check(
+            "foo   bar     baz   :asdf  ",
+            false,
+            &[],
+            None,
+            "foo",
+            &["bar", "baz", "asdf  "],
+        );
+        check(
+            ":foo   bar     baz   :  asdf",
+            false,
+            &[],
+            Some("foo"),
+            "bar",
+            &["baz", "  asdf"],
+        );
+        check(
+            "@foo   bar     baz   :  asdf",
+            false,
+            &[("foo", None)],
+            None,
+            "bar",
+            &["baz", "  asdf"],
+        );
         check("foo bar baz   ", false, &[], None, "foo", &["bar", "baz"]);
-        check("foo bar :baz   ", true, &[], None, "foo", &["bar", "baz   "]);
-        check("foo bar\tbaz asdf", true, &[], None, "foo", &["bar\tbaz", "asdf"]);
-        check("foo bar :baz asdf\t", true, &[], None, "foo", &["bar", "baz asdf\t"]);
+        check(
+            "foo bar :baz   ",
+            true,
+            &[],
+            None,
+            "foo",
+            &["bar", "baz   "],
+        );
+        check(
+            "foo bar\tbaz asdf",
+            true,
+            &[],
+            None,
+            "foo",
+            &["bar\tbaz", "asdf"],
+        );
+        check(
+            "foo bar :baz asdf\t",
+            true,
+            &[],
+            None,
+            "foo",
+            &["bar", "baz asdf\t"],
+        );
     }
 }

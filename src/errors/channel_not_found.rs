@@ -1,15 +1,13 @@
-use std::fmt::{Display, Formatter, Error};
+use std::fmt::{Display, Error, Formatter};
 
 #[derive(Debug)]
 pub struct ChannelNotFoundError {
-    pub channel: String
+    pub channel: String,
 }
 
 impl ChannelNotFoundError {
     pub fn new(channel: String) -> Self {
-        Self {
-            channel
-        }
+        Self { channel }
     }
 }
 
@@ -19,6 +17,4 @@ impl Display for ChannelNotFoundError {
     }
 }
 
-impl std::error::Error for ChannelNotFoundError {
-
-}
+impl std::error::Error for ChannelNotFoundError {}

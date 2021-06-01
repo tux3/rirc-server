@@ -1,19 +1,19 @@
-use rirc_server::{Server, ServerSettings, ServerCallbacks};
-use tokio_rustls::rustls::{Certificate, PrivateKey, ServerConfig, NoClientAuth};
-use tokio_rustls::rustls::internal::pemfile::{certs, pkcs8_private_keys};
-use std::path::{PathBuf, Path};
-use std::io::{BufReader, Error, ErrorKind, Result};
+use rirc_server::{Server, ServerCallbacks, ServerSettings};
 use std::fs::File;
+use std::io::{BufReader, Error, ErrorKind, Result};
+use std::path::{Path, PathBuf};
 use structopt::StructOpt;
+use tokio_rustls::rustls::internal::pemfile::{certs, pkcs8_private_keys};
+use tokio_rustls::rustls::{Certificate, NoClientAuth, PrivateKey, ServerConfig};
 
 #[derive(StructOpt)]
 struct Options {
     /// Your fullchain.pem certificate chain
-    #[structopt(short="c", long="cert", parse(from_os_str))]
+    #[structopt(short = "c", long = "cert", parse(from_os_str))]
     cert: PathBuf,
 
     /// Your privkey.pem key
-    #[structopt(short="k", long="key", parse(from_os_str))]
+    #[structopt(short = "k", long = "key", parse(from_os_str))]
     key: PathBuf,
 }
 
@@ -38,13 +38,18 @@ async fn main() -> Result<()> {
     //       If you get CorruptMessagePayload(Handshake) errors on 127.0.0.1, this is why
     //       See https://github.com/briansmith/webpki/issues/54
     let mut tls_config = ServerConfig::new(NoClientAuth::new());
-    tls_config.set_single_cert(certs, keys.remove(0)).expect("Failed to set server certificate");
+    tls_config
+        .set_single_cert(certs, keys.remove(0))
+        .expect("Failed to set server certificate");
 
-    let mut server = Server::new(ServerSettings {
-        listen_addr: "0.0.0.0:6697".parse().unwrap(),
-        server_name: "example-tls-server".to_owned(),
-        ..Default::default()
-    }, ServerCallbacks::default());
+    let mut server = Server::new(
+        ServerSettings {
+            listen_addr: "0.0.0.0:6697".parse().unwrap(),
+            server_name: "example-tls-server".to_owned(),
+            ..Default::default()
+        },
+        ServerCallbacks::default(),
+    );
     server.use_tls(tls_config.into());
 
     server.start().await

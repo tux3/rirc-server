@@ -1,9 +1,9 @@
-use std::io::{Error};
-use futures::{Sink};
 use crate::message::Message;
 use futures::task::{Context, Poll};
-use tokio::macros::support::Pin;
+use futures::Sink;
+use std::io::Error;
 use tokio::io::AsyncWrite;
+use tokio::macros::support::Pin;
 
 // A Sink for sending IRC messages
 pub struct MessageSink<T: AsyncWrite + Unpin> {
@@ -39,7 +39,9 @@ impl<T: AsyncWrite + Unpin> Sink<Message> for MessageSink<T> {
 
         while !this.send_buffer.is_empty() {
             match this.io.as_mut().poll_write(cx, &this.send_buffer) {
-                Poll::Ready(Ok(n)) => { this.send_buffer.drain(0..n); },
+                Poll::Ready(Ok(n)) => {
+                    this.send_buffer.drain(0..n);
+                }
                 Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
                 Poll::Pending => return Poll::Pending,
             }

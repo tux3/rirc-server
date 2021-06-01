@@ -1,12 +1,15 @@
 extern crate rirc_server;
 
-use rirc_server::{Server, ServerSettings, ServerCallbacks};
+use rirc_server::{Server, ServerCallbacks, ServerSettings};
 
 #[test]
 fn can_instantiate_server() {
-    let _ = Server::new(ServerSettings {
-        listen_addr: "0.0.0.0:6667".parse().unwrap(),
-        server_name: "test-server".to_owned(),
-        ..Default::default()
-    }, ServerCallbacks::default());
+    let _ = Server::new(
+        ServerSettings {
+            listen_addr: "0.0.0.0:6667".parse().unwrap(),
+            server_name: "test-server".to_owned(),
+            ..Default::default()
+        },
+        ServerCallbacks::default(),
+    );
 }

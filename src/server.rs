@@ -1,27 +1,27 @@
-use crate::settings::ServerSettings;
 use crate::callbacks::ServerCallbacks;
-use crate::client::{ClientDuplex, Client, ClientStatus};
-use crate::channel::{Channel};
-use crate::message::{self, Message, make_reply_msg, ReplyCode};
-use crate::commands::{COMMANDS, is_command_available};
+use crate::channel::Channel;
+use crate::client::{Client, ClientDuplex, ClientStatus};
+use crate::commands::{is_command_available, COMMANDS};
+use crate::message::{self, make_reply_msg, Message, ReplyCode};
+use crate::settings::ServerSettings;
 
-use futures::StreamExt;
 use chrono::{DateTime, Local};
+use futures::StreamExt;
+use std::collections::HashMap;
 use std::io::Error;
 use std::sync::{Arc, Weak};
-use std::collections::HashMap;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 use tokio_stream::wrappers::TcpListenerStream;
 
 #[cfg(feature = "tls")]
-use tokio_rustls::{TlsAcceptor, rustls::ServerConfig};
+use tokio_rustls::{rustls::ServerConfig, TlsAcceptor};
 
 pub struct ServerState {
     pub settings: ServerSettings,
     pub callbacks: ServerCallbacks,
     pub clients: Mutex<HashMap<String, Weak<RwLock<Client>>>>, // Peer addr -> Client
-    pub users: RwLock<HashMap<String, Weak<RwLock<Client>>>>, // Nickname -> Registered Client
+    pub users: RwLock<HashMap<String, Weak<RwLock<Client>>>>,  // Nickname -> Registered Client
     pub channels: Mutex<HashMap<String, Arc<RwLock<Channel>>>>, // Channel name -> Channel
     pub creation_time: DateTime<Local>,
 }
@@ -35,7 +35,7 @@ impl ServerState {
         assert!(!settings.server_name.contains(' '));
         assert!(!settings.network_name.contains(' '));
 
-        Arc::new(ServerState{
+        Arc::new(ServerState {
             settings,
             callbacks,
             creation_time: Local::now(),
@@ -115,12 +115,18 @@ impl Server {
         Ok(client)
     }
 
-    async fn handle_client(state: Arc<ServerState>, mut client_duplex: ClientDuplex) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_client(
+        state: Arc<ServerState>,
+        mut client_duplex: ClientDuplex,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let addr = client_duplex.client.addr;
         println!("New client: {}", &addr);
         let client = Arc::new(RwLock::new(client_duplex.client));
         {
-            let old_client = state.clients.lock().await
+            let old_client = state
+                .clients
+                .lock()
+                .await
                 .insert(addr.to_string(), Arc::downgrade(&client));
             debug_assert!(old_client.is_none());
         }
@@ -139,7 +145,11 @@ impl Server {
         Ok(())
     }
 
-    async fn process_message(state: Arc<ServerState>, client_lock: Arc<RwLock<Client>>, msg: Message) -> Result<(), Error> {
+    async fn process_message(
+        state: Arc<ServerState>,
+        client_lock: Arc<RwLock<Client>>,
+        msg: Message,
+    ) -> Result<(), Error> {
         if let Some(command) = COMMANDS.get(&msg.command.to_ascii_uppercase() as &str) {
             if is_command_available(&command, &*client_lock.read().await) {
                 (command.handler)(state.clone(), client_lock.clone(), msg).await?;
@@ -153,7 +163,15 @@ impl Server {
             };
 
             if let Some(nick) = maybe_nick {
-                client.send(make_reply_msg(&state, &nick, ReplyCode::ErrUnknownCommand{cmd: msg.command.clone()})).await?;
+                client
+                    .send(make_reply_msg(
+                        &state,
+                        &nick,
+                        ReplyCode::ErrUnknownCommand {
+                            cmd: msg.command.clone(),
+                        },
+                    ))
+                    .await?;
             }
         };
 
